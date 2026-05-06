@@ -1,0 +1,23 @@
+name = "OutputVault"
+uuid = "73131c07-f5bc-4fd3-b98a-1e5f3b14898e"
+version = "0.1.0"
+authors = ["Vadim Elenev <47358678+elenev@users.noreply.github.com>"]
+
+[deps]
+FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
+Glob = "c27321d9-0574-5035-807b-f59d2c89b15c"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+LibGit2 = "76f85450-5226-5b5a-8eaa-529ad045b433"
+
+[weakdeps]
+TransitionFunctionIteration = "7ca8190d-a0e2-4989-8875-c3198677b17d"
+
+[extensions]
+OutputVaultTFIExt = "TransitionFunctionIteration"
+
+[compat]
+FileIO = "1"
+Glob = "1"
+JLD2 = "0.4"
+LibGit2 = "1"
+julia = "1.9"
