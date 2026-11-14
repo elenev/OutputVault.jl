@@ -117,6 +117,37 @@ be read directly with `load_solution(path, model)` and `load_steadystate(path, m
 
 Components saved by OutputVault 0.1 (one `{component}.jld2` file per component) still load.
 
+## Querying outputs with DuckDB
+
+`sql/outputvault.sql` (path: `duckdb_sql_path()`) defines DuckDB table macros over an output
+root, for analysis in any language with a DuckDB client. They take the root as an argument, so
+the file is the same on every machine:
+
+| macro                    | columns                                                       |
+|:-------------------------|:--------------------------------------------------------------|
+| `vault_stats(root)`      | `branch, experdef, economy, sample, variable, stat, value`    |
+| `vault_errstats(root)`   | `branch, experdef, economy, variable, stat, value`            |
+| `vault_simulation(root)` | `branch, experdef, economy`, then the panel's columns         |
+| `vault_runs(root)`       | `branch, experdef, economy`                                   |
+
+The run identity comes from the folder names, so `experdef` must not contain `-` (`RunHandle`
+enforces it); `economy` may contain anything. OutputVault imposes no convention on economy names.
+To split them into columns, pass a regex with one group per part and the parts' names:
+
+```sql
+SELECT * FROM vault_stats('/path/to/output_root', '^([^_]+)(?:_(.+))?$', ['model', 'scheme'])
+WHERE variable = 'K' AND stat = 'mean';
+```
+
+Python: `con.execute(open(path).read())`. DuckDB.jl runs one statement per call:
+
+```julia
+using DuckDB, OutputVault
+con = DBInterface.connect(DuckDB.DB)
+foreach(s -> DBInterface.execute(con, s), duckdb_statements())
+DBInterface.execute(con, "SELECT * FROM vault_stats('$root')")
+```
+
 ## Storing other packages' types
 
 A package can have its types stored in formats of its own: define `OutputVault.storage_kind`

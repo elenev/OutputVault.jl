@@ -25,6 +25,10 @@ src/
                       save_solution, load_solution, save_steadystate,
                       load_steadystate, model_metadata, model_from_metadata
   discovery.jl     -- find_matching_results, get_results_folders, key helpers
+  duckdb.jl        -- duckdb_sql_path, duckdb_statements (the SQL is sql/outputvault.sql)
+sql/
+  outputvault.sql  -- DuckDB table macros over an output root (vault_stats, vault_errstats,
+                      vault_simulation, vault_runs); run identity parsed from folder names
 ext/
   OutputVaultTFIExt.jl -- extension (triggers: TFI, StaticArrays, StructArrays,
                           all loaded with TFI): writers/readers for TFI types,

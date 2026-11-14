@@ -4,13 +4,19 @@
 
 Identifies a saved run by branch, experiment definition, and economy name.
 
-All fields are coerced to `String` on construction.
+All fields are coerced to `String` on construction. `experdef` must not contain `-`: the run's
+folder is `res-<experdef>-<economy>`, and readers (the DuckDB macros in `outputvault.sql`) split
+it at the first hyphen. `economy` may contain anything.
 """
 @kwdef struct RunHandle
     branch::String   = current_branch()
     experdef::String = "default"
     economy::String
-    RunHandle(branch, experdef, economy) = new(string(branch), string(experdef), string(economy))
+    function RunHandle(branch, experdef, economy)
+        e = string(experdef)
+        occursin('-', e) && throw(ArgumentError("experdef \"$e\" contains '-'; the run folder res-<experdef>-<economy> splits at the first hyphen"))
+        new(string(branch), e, string(economy))
+    end
 end
 
 RunHandle(economy; kwargs...) = RunHandle(; economy=string(economy), kwargs...)

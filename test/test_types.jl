@@ -39,6 +39,11 @@
     end
 end
 
+@testset "RunHandle: experdef without hyphens" begin
+    @test_throws ArgumentError RunHandle("x"; branch = "b", experdef = "high-risk")
+    @test RunHandle("frm-grid_a"; branch = "b", experdef = "high_risk").economy == "frm-grid_a"
+end
+
 @testset "Config" begin
     cfg = Config(; output_root = "/tmp/test")
     @test OutputVault.output_root(cfg)     == "/tmp/test"
