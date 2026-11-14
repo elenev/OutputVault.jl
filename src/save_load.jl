@@ -43,6 +43,10 @@ end
 Save all components of `result` under the economy folder for `rf`, one folder per component and
 one file per property. Returns the economy folder path.
 
+The economy folder holds the results of one solution: saving the `git_component(cfg)` (the
+solution) first deletes the folder and everything in it, so that no results of an earlier
+solution remain. Saves that skip the git component add to the folder.
+
 The `git_component(cfg)` folder also receives the git commit id (`git_commit.txt`) and, for a
 dirty repository, the staged and unstaged diffs (`git_staged.diff`, `git_unstaged.diff`; the
 latter includes untracked files). Objects in that component get the commit id as provenance.
@@ -57,6 +61,7 @@ function save_result(cfg::AbstractConfig, rf::RunHandle, result;
         dirty_repo_check::Symbol    = :warn)
 
     commit_id, diffs = get_commit_id(dirty_repo_check)
+    git_component(cfg) in skip || _clear_economy_folder(cfg, rf)
     epath = economy_folder(cfg, rf; create=true)
 
     for (component, props) in pairs(components(cfg))
@@ -74,6 +79,12 @@ end
 
 save_result(rf::RunHandle, result; kwargs...) =
     save_result(global_config(), rf, result; kwargs...)
+
+# delete the economy folder (`output_root/branch/res-{experdef}-{economy}`) if it exists
+function _clear_economy_folder(cfg, rf)
+    p = joinpath(output_path(cfg, rf.branch), "res-$(rf.experdef)-$(rf.economy)")
+    isdir(p) && rm(p; recursive=true)
+end
 
 # commit id and (if any) diffs as text files; returns the commit id as provenance for the objects
 function write_git_files(dir, commit_id, diffs)

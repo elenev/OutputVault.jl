@@ -101,6 +101,22 @@ OutputVault.read_kind(::Val{Symbol("OutputVaultTests.Kinded")}, path) = _Kinded(
                 @test isnothing(OutputVault.recorded_kind(joinpath(OutputVault.economy_folder(cfg, rf), "solution", "obj.jld2")))
             end
 
+            @testset "saving a solution replaces the economy folder" begin
+                rf_c  = RunHandle("clear"; branch="testbranch", experdef="base")
+                epath = save_result(cfg, rf_c, res; skip=(), dirty_repo_check=:ignore)
+                write(joinpath(epath, "solution", "stale.txt"), "x")
+                write(joinpath(epath, "leftover.txt"), "x")
+                # a save without the solution adds to the folder
+                save_result(cfg, rf_c, res; skip=(:solution,), dirty_repo_check=:ignore)
+                @test isfile(joinpath(epath, "leftover.txt"))
+                # a save with the solution starts from an empty folder; skipped components are gone
+                save_result(cfg, rf_c, res; skip=(:stats,), dirty_repo_check=:ignore)
+                @test !isfile(joinpath(epath, "leftover.txt"))
+                @test !isfile(joinpath(epath, "solution", "stale.txt"))
+                @test !isdir(joinpath(epath, "stats"))
+                @test isfile(joinpath(epath, "solution", "obj.jld2"))
+            end
+
             @testset "components saved by OutputVault 0.1 still load" begin
                 rf_old = RunHandle("legacy"; branch="testbranch", experdef="base")
                 epath  = OutputVault.economy_folder(cfg, rf_old; create=true)
@@ -113,6 +129,9 @@ OutputVault.read_kind(::Val{Symbol("OutputVaultTests.Kinded")}, path) = _Kinded(
                 write(joinpath(git_dir, "dirty_save.txt"), "x")
                 rf5 = RunHandle("dirty_err"; branch="testbranch", experdef="base")
                 @test_throws ErrorException save_result(cfg, rf5, res; dirty_repo_check=:error)
+                # a failed check leaves an existing folder untouched
+                @test_throws ErrorException save_result(cfg, rf, res; dirty_repo_check=:error)
+                @test isfile(joinpath(OutputVault.economy_folder(cfg, rf), "solution", "obj.jld2"))
                 # no files should have been written
                 @test !isdir(OutputVault.output_path(cfg, "testbranch") * "/res-base-dirty_err")
             end

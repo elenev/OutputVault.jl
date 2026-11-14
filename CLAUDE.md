@@ -112,7 +112,9 @@ Layout: `economy_folder/{component}/{property}.{ext}`. The git component folder
 also gets `git_commit.txt` and, if dirty, `git_staged.diff` / `git_unstaged.diff`.
 
 `save_result(cfg, rf, result; skip, dirty_repo_check)`: calls `get_commit_id`
-once; for each component not skipped, makes its folder, writes the git files
+once; if the git component is not skipped, deletes the economy folder (one
+folder = results of one solution; decided 2026-11-14, stale diffs and old
+simulations next to a new solution were the reason); for each component not skipped, makes its folder, writes the git files
 (git component only, whose objects get `provenance = Dict("git_commit_id" => id)`),
 then `write_object(cfg, dir, string(p), getproperty(result, p); provenance)` for
 each property.

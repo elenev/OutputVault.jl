@@ -69,6 +69,10 @@ save_result(rb, result)                     # skips :simulation by default
 save_result(rb, result; skip=())            # save everything
 ```
 
+Saving the git component (the solution) replaces the run's folder: everything saved
+earlier for that run is deleted first, so the folder never mixes results of different
+solutions. Saves that skip the solution (e.g. IRFs computed later) add to the folder.
+
 `save_result` warns (or errors, if `dirty_repo_check=:error`) when the
 repository has uncommitted changes, and stores the diffs alongside the commit
 ID in the solution folder. Tables need a `table_format`; any Tables.jl writer and reader pair
