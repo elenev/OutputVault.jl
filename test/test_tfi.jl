@@ -1,9 +1,8 @@
-# OutputVault with TransitionFunctionIteration: solution and steady-state files, tables through a
-# TableFormat (parquet), save_result/load round trips, and allocations when restoring from
-# parquet. Uses tfi_fixtures.jl.
+# OutputVault with TransitionFunctionIteration: solution and steady-state files, tables through
+# OutputVault.Formats.ParquetFormat, save_result/load round trips, and allocations when restoring
+# from parquet. Uses tfi_fixtures.jl.
 using Parquet2, Tables, DataAPI, Statistics, StaticArrays
-const PARQUET = TableFormat(ext = "parquet", read = Parquet2.Dataset,
-                            write = (path, table, meta) -> Parquet2.writefile(path, table; metadata = meta))
+const PARQUET = OutputVault.Formats.ParquetFormat()
 
 struct MetaTestModel <: AbstractModel
     a::Float64
@@ -32,14 +31,12 @@ end
     path = joinpath(mktempdir(), "sol.jld2")
     @test save_solution(path, obj; provenance = Dict("git_commit_id" => "abc123")) == path
 
-    o1 = load_solution(path)                                  # exact model
+    o1 = load_solution(path, NeoclassicalGrowthModel)         # model_from_metadata
     @test same_solution(o1, obj) && o1.model == ngm
     @test solution_id(o1) == solution_id(obj)                    # the id survives the file
     o2 = @test_logs load_solution(path, ngm)                  # supplied model, matching metadata
     @test same_solution(o2, obj)
     @test_logs (:warn, r"metadata differ") match_mode = :any load_solution(path, NeoclassicalGrowthModel(β = 0.95))
-    o3 = load_solution(path, NeoclassicalGrowthModel)         # model_from_metadata
-    @test same_solution(o3, obj) && o3.model == ngm
 
     # the restored solution evaluates and simulates like the original
     pt = (exst = 2, K = 3.0)
@@ -51,15 +48,16 @@ end
     objf, _ = main_setup(fm)
     main_execute!(objf; maxiter = 300, tol = -7, logging = COMPLETE)
     pathf = save_solution(joinpath(mktempdir(), "solf.jld2"), objf)
-    of = load_solution(pathf)
+    of = load_solution(pathf, fm)
     @test same_solution(of, objf) && varnames(of.Ffct) == (:Cnow,)
     @test solution_id(of) == solution_id(objf) != solution_id(obj)
-    @test same_solution(load_solution(pathf, fm), objf)
 
     # stored layout: plain arrays over the grid axes, Tfct with a next-state axis
     jldopen(path, "r") do io
         @test io["outputvault/kind"] == "TransitionFunctionIteration.ModelSolution"
-        @test io["meta/schema_version"] == 1
+        @test io["meta/schema_version"] == 2
+        @test !haskey(io, "exact")                                    # plain data only
+        @test io["Pfct/__bounds/__names"] == ["C"] && io["Pfct/__bounds/C"] == [0.0, Inf]
         @test io["grid/__axes"] == ["exst", "K"]
         @test size(io["Pfct/C"]) == (ngm.N_A, 20)
         @test size(io["Tfct/K"]) == (ngm.N_A, 20, ngm.N_A)
@@ -73,31 +71,34 @@ end
     dir = mktempdir()
     save_solution(joinpath(dir, "obj.jld2"), obj)
     path = save_steadystate(joinpath(dir, "stv.jld2"), stv)
-    @test load_steadystate(path) == stv                       # model from the solution next to it
     @test load_steadystate(path, ngm) == stv
     @test load_steadystate(path, NeoclassicalGrowthModel) == stv
     jldopen(path, "r") do io
         @test io["outputvault/kind"] == "TransitionFunctionIteration.SteadyState"
         @test !haskey(io, "exact")                                    # no copy of the model
     end
-    # alone in a folder, the model must be supplied
-    alone = save_steadystate(joinpath(mktempdir(), "stv.jld2"), stv)
-    @test_throws ArgumentError load_steadystate(alone)
+end
+
+@testset "TFI: bounds as intervals" begin
+    ext = Base.get_extension(OutputVault, :OutputVaultTFIExt)
+    for b in (TransitionFunctionIteration.Unbounded(), TransitionFunctionIteration.LowerBounded(-1.0),
+              TransitionFunctionIteration.UpperBounded(2.0), TransitionFunctionIteration.IntervalBounded(0.0, 3.0))
+        @test ext.interval_bound(ext.bound_interval(b)) == b
+    end
 end
 
 @testset "TFI: save_result and load" begin
     git_dir = make_git_repo()
     irf = simulate_irf(obj, simseries; shocks = (pos = 2,), path_vars = (:K,), T = 5, N = 20)
     result = (; obj, stv, stats, errstats, simseries, errs, irf)
-    comps = (solution = (:obj, :stv), stats = (:stats, :errstats), simulation = (:simseries, :errs), irf = (:irf,))
 
     mktempdir() do root
-        cfg = Config(; output_root = root, components = comps, table_format = PARQUET)
+        cfg = Config(; output_root = root, table_format = PARQUET)
         rf = RunHandle("ngm"; branch = "testbranch", experdef = "base")
         cd(git_dir) do
-            epath = save_result(cfg, rf, result; skip = (), dirty_repo_check = :ignore)
-            for f in ("solution/obj.jld2", "solution/stv.jld2", "solution/git_commit.txt",
-                      "stats/stats.parquet", "stats/errstats.parquet",
+            epath = save_result(cfg, rf, result; dirty_repo_check = :ignore)
+            for f in ("solution/res.jld2", "solution/obj.jld2", "solution/stv.jld2", "solution/git_commit.txt",
+                      "stats/stats.parquet", "errstats/errstats.parquet",
                       "simulation/simseries.parquet", "simulation/errs.parquet",
                       "irf/irf.parquet", "irf/irf_paths.parquet")
                 @test isfile(joinpath(epath, f))
@@ -109,12 +110,17 @@ end
             commit = strip(read(joinpath(epath, "solution", "git_commit.txt"), String))
             @test jldopen(io -> io["meta/provenance/git_commit_id"], joinpath(epath, "solution", "obj.jld2")) == commit
 
-            # every object comes back as its own type
+            # every object comes back as its own type, from either copy of the solution
             sol = load(cfg, rf, :solution)
-            @test same_solution(sol.obj, obj) && sol.obj.model == ngm
+            @test same_solution(sol.obj, obj) && sol.obj.model == ngm && solution_id(sol.obj) == solution_id(obj)
             @test sol.stv == stv
-            st = load(cfg, rf, :stats)
-            @test st.stats == stats && st.errstats == errstats
+            for model in (NeoclassicalGrowthModel, ngm)
+                solp = load(cfg, rf, :solution; solution_format = :portable, model)
+                @test same_solution(solp.obj, obj) && solp.obj.model == ngm && solp.stv == stv
+            end
+            @test_throws ArgumentError load(cfg, rf, :solution; solution_format = :portable)
+            @test load(cfg, rf, :stats).stats == stats
+            @test load(cfg, rf, :errstats).errstats == errstats
             sim = load(cfg, rf, :simulation)
             @test sim.simseries.data == simseries.data && sim.simseries.provenance == simseries.provenance
             @test endog_states(sim.simseries) == endog_states(simseries)
@@ -122,10 +128,27 @@ end
             r = load(cfg, rf, :irf).irf
             @test r.means == irf.means && r.stdevs == irf.stdevs && r.paths.pos == irf.paths.pos
             @test r.provenance == irf.provenance
+
+            # moments by sample, as describe returns them: one table per sample, restored in order
+            # (a_all sorts before uncond in the folder, but comes second)
+            samples = describe(simseries; filters = (a_all = Returns(true),)).moments
+            @test keys(samples) == (:uncond, :a_all)
+            rf_s = RunHandle("ngm_samples"; branch = "testbranch", experdef = "base")
+            epath_s = save_result(cfg, rf_s, (; obj, stats = samples); dirty_repo_check = :ignore)
+            @test sort(readdir(joinpath(epath_s, "stats"))) == ["a_all.parquet", "uncond.parquet"]
+            ds = Parquet2.Dataset(joinpath(epath_s, "stats", "a_all.parquet"))
+            @test DataAPI.metadata(ds, "outputvault.part_of") == "stats" && DataAPI.metadata(ds, "outputvault.part_index") == "2"
+            restored = load(cfg, rf_s, :stats).stats
+            @test keys(restored) == keys(samples) && restored == samples
+
+            # compare_economies over saved runs reads each run's stats component
+            moms = (mean_K = ReportedMoment(:K),)
+            @test with_config(() -> compare_economies(moms, (a = rf_s, b = rf_s)), cfg) ==
+                  compare_economies(moms, (a = samples, b = samples))
         end
 
         # tables need a table format
-        cfg0 = Config(; output_root = root, components = (stats = (:stats,),))
+        cfg0 = Config(; output_root = root)
         cd(git_dir) do
             @test_throws ArgumentError save_result(cfg0, RunHandle("nofmt"; branch = "testbranch"), (; stats);
                                                    dirty_repo_check = :ignore)
@@ -144,8 +167,8 @@ restore_dense(table) = MomentArray{ALLOC_ROWS, ALLOC_COLS, Float64}(table)
     R, C = length(ALLOC_ROWS), length(ALLOC_COLS)
     ma = MomentArray(reshape(collect(1.0:R*C), R, C), ALLOC_ROWS, ALLOC_COLS)
     path = joinpath(mktempdir(), "ma.parquet")
-    PARQUET.write(path, ma, Dict{String,String}())
-    ds = PARQUET.read(path)
+    OutputVault.write_table_file(PARQUET, path, ma, Dict{String,String}())
+    ds = OutputVault.read_table_file(PARQUET, path)
     @test restore_static(ds) == ma && restore_dense(ds) == ma
     # baseline: Parquet2's part of the work (metadata entries, the column table and its names,
     # each column, the row names as Strings). The restore adds less than one matrix (static) or

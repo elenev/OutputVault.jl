@@ -40,49 +40,42 @@
 end
 
 @testset "Config" begin
-    cfg = Config(;
-        output_root     = "/tmp/test",
-        components      = (solution=(:x, :y), stats=(:z,)),
-        git_component   = :solution,
-        skip_components = (:simulation,),
-    )
+    cfg = Config(; output_root = "/tmp/test")
     @test OutputVault.output_root(cfg)     == "/tmp/test"
-    @test OutputVault.components(cfg)      == (solution=(:x, :y), stats=(:z,))
-    @test OutputVault.git_component(cfg)   == :solution
-    @test OutputVault.skip_components(cfg) == (:simulation,)
+    @test isnothing(OutputVault.table_format(cfg))
+    @test OutputVault.solution_format(cfg) == (:portable, :native)
 
-    # defaults
-    cfg2 = Config(; output_root="/tmp/x", components=(solution=(:a,),))
-    @test OutputVault.git_component(cfg2)   == :solution
-    @test OutputVault.skip_components(cfg2) == (:simulation,)
+    cfg2 = Config(; output_root = "/tmp/x", table_format = OutputVault.Formats.ParquetFormat(),
+                  solution_format = :portable)
+    @test OutputVault.table_format(cfg2) === OutputVault.Formats.ParquetFormat()
+    @test OutputVault.solution_format(cfg2) == (:portable,)
+    @test_throws ArgumentError Config(; output_root = "/tmp/x", solution_format = :exact)
+    @test_throws ArgumentError Config(; output_root = "/tmp/x", solution_format = ())
+end
 
-    # skip_components as Vector is stored as NTuple
-    cfg3 = Config(;
-        output_root     = "/tmp/y",
-        components      = (solution=(:a,),),
-        skip_components = [:simulation, :stats],
-    )
-    @test OutputVault.skip_components(cfg3) isa NTuple
-    @test OutputVault.skip_components(cfg3) == (:simulation, :stats)
+@testset "LAYOUT" begin
+    @test keys(LAYOUT) == (:solution, :stats, :errstats, :simulation, :irf)
+    @test LAYOUT.solution == (:obj, :stv) && LAYOUT.stats == (:stats,) && LAYOUT.errstats == (:errstats,)
+    @test OutputVault.layout_properties(:simulation) == (:simseries, :errs)
+    @test_throws ArgumentError OutputVault.layout_properties(:other)
+end
 
-    # empty skip_components
-    cfg4 = Config(; output_root="/tmp/z", components=(solution=(:a,),), skip_components=())
-    @test OutputVault.skip_components(cfg4) == ()
-    @test OutputVault.skip_components(cfg4) isa NTuple{0, Symbol}
-
-    # type parameter N matches length
-    @test typeof(cfg3) <: OutputVault.Config{<:NamedTuple, 2}
-    @test typeof(cfg4) <: OutputVault.Config{<:NamedTuple, 0}
+@testset "table formats" begin
+    fmt = TableFormat(ext = "txt", write = (path, t, m) -> write(path, "x"), read = path -> read(path, String))
+    @test OutputVault.table_extension(fmt) == "txt"
+    path = tempname() * ".txt"
+    OutputVault.write_table_file(fmt, path, nothing, Dict{String,String}())
+    @test OutputVault.read_table_file(fmt, path) == "x"
+    @test OutputVault.table_extension(OutputVault.Formats.ParquetFormat()) == "parquet"
 end
 
 struct _MinCfg <: OutputVault.AbstractConfig end  # module-level: struct inside @testset is a syntax error
+struct _NoContract <: OutputVault.AbstractTableFormat end
 
 @testset "AbstractConfig interface" begin
     mc = _MinCfg()
-
-    # all four interface methods error on a bare subtype
     @test_throws ErrorException OutputVault.output_root(mc)
-    @test_throws ErrorException OutputVault.components(mc)
-    @test_throws ErrorException OutputVault.git_component(mc)
-    @test_throws ErrorException OutputVault.skip_components(mc)
+    @test isnothing(OutputVault.table_format(mc))
+    @test OutputVault.solution_format(mc) == (:portable, :native)
+    @test_throws ErrorException OutputVault.write_table_file(_NoContract(), "p", nothing, Dict{String,String}())
 end

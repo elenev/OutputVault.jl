@@ -6,12 +6,7 @@ using LibGit2
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
 
-make_cfg(root) = Config(;
-    output_root     = root,
-    components      = (solution=(:obj, :val), stats=(:n,)),
-    git_component   = :solution,
-    skip_components = (:simulation,),
-)
+make_cfg(root) = Config(; output_root = root)
 
 function make_git_repo()
     dir = mktempdir()

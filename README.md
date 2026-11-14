@@ -10,20 +10,39 @@ the output directory accumulates results from many development cycles.
 ## Approach
 
 OutputVault organizes outputs under a configurable root directory:
-`branch/res-{experdef}-{economy}/{component}/{property}.{ext}`. Each component is a folder with
-one file per property of the result object. The component designated for git (by default the
-solution) also receives the commit ID (`git_commit.txt`) and, for a dirty repository, the staged
+`branch/res-{experdef}-{economy}/{component}/{property}.{ext}`. Where each object goes is fixed
+for every project (`LAYOUT`), so tools such as `compare_economies` find objects in any run:
+
+| component    | properties                                          |
+|:-------------|:----------------------------------------------------|
+| `solution`   | `obj`, `stv`                                        |
+| `stats`      | `stats` (the moments `compare_economies` compares)  |
+| `errstats`   | `errstats`                                          |
+| `simulation` | `simseries`, `errs`                                 |
+| `irf`        | `irf`                                               |
+
+Moments by sample (`describe(simseries).moments`) are saved one table per sample,
+`stats/<sample>.<ext>`; each file records its position, so loading returns the samples in order.
+
+Which objects are saved is chosen in each call: `save_result` saves the properties of the result
+that the layout names, skipping missing or `nothing` ones and ignoring the rest. The solution
+folder also receives the commit ID (`git_commit.txt`) and, for a dirty repository, the staged
 and unstaged diffs (`git_staged.diff`, `git_unstaged.diff`, including untracked files). The
 diffs are computed without touching the repository's index.
 
-Objects are stored by type. With TransitionFunctionIteration loaded, a `ModelSolution` goes to
-an HDF5-compatible JLD2 file of plain arrays plus an exact copy of the model, a `SteadyState`
-to plain data, and simulations, error panels, moment tables and IRFs to tables in a format the
-project chooses (e.g. parquet), with their provenance in the file's metadata. Other objects are
-stored with JLD2. Loading returns each object as its own type.
+The solution is saved in two formats by default (`solution_format = (:portable, :native)`).
+The native copy, `solution/res.jld2`, holds the solution's objects exactly as they are in Julia:
+quick to load, but it needs code compatible with the code that wrote it, so it is meant for work
+done soon after the solve. The portable copy is one file per object in a documented layout of
+plain data, meant for long-term storage. Other components are always portable.
 
-Project-specific behavior (output root, component definitions, table format) is injected
-through a `Config` struct. For library authors who need more flexibility, the
+Portable objects are stored by type. With TransitionFunctionIteration loaded, a
+`ModelSolution` goes to an HDF5-compatible JLD2 file of plain arrays and metadata, a
+`SteadyState` to plain data, and simulations, error panels, moment tables and IRFs to tables in a format the
+project chooses, with their provenance in the file's metadata. Other objects are stored with
+JLD2. Loading returns each object as its own type.
+
+Project settings (output root, table format, solution format) are set in a `Config` struct. For library authors who need more flexibility, the
 `AbstractConfig` interface allows dispatch-based customization. The active
 config is registered globally via `set_config!`, typically in the host
 package's `__init__`, so downstream code calls `save_result` and `load`
@@ -46,44 +65,43 @@ import OutputVault
 function __init__()
     OutputVault.set_config!(OutputVault.Config(
         output_root     = "/path/to/outputs",
-        git_component   = :solution,        # receives git metadata; default :solution
-        skip_components = (:simulation,),   # skipped by default; default (:simulation,)
-        components      = (
-            solution   = (:obj, :stv),
-            stats      = (:stats,),
-            simulation = (:simseries, :errs),
-        ),
-        table_format    = TableFormat(ext = "parquet", read = Parquet2.Dataset,
-            write = (path, table, meta) -> Parquet2.writefile(path, table; metadata = meta)),
+        table_format    = OutputVault.Formats.ParquetFormat(),   # needs `using Parquet2`
+        solution_format = (:portable, :native),   # default; or :portable or :native alone
     ))
 end
 ```
 
-Then save a result object whose fields match the declared component properties:
+Then save a result whose properties are named in the layout:
 
 ```julia
 using OutputVault
 
 rb = RunHandle("baseline")               # branch defaults to current git branch
-save_result(rb, result)                     # skips :simulation by default
-save_result(rb, result; skip=())            # save everything
+save_result(rb, (; obj, stv, stats, errstats, simseries, errs))   # everything
+save_result(rb, (; obj, stv, stats, errstats))                    # without the simulation
 ```
 
-Saving the git component (the solution) replaces the run's folder: everything saved
-earlier for that run is deleted first, so the folder never mixes results of different
-solutions. Saves that skip the solution (e.g. IRFs computed later) add to the folder.
+A save that includes solution objects replaces the run's folder: everything saved earlier for
+that run is deleted first, so the folder never mixes results of different solutions. Saves
+without solution objects (e.g. IRFs computed later) add to the folder.
 
 `save_result` warns (or errors, if `dirty_repo_check=:error`) when the
 repository has uncommitted changes, and stores the diffs alongside the commit
-ID in the solution folder. Tables need a `table_format`; any Tables.jl writer and reader pair
-works, but TFI's tables restore fully only from formats that keep table metadata (parquet).
+ID in the solution folder.
+
+Tables need a `table_format`. Built-in formats are in `OutputVault.Formats` and load with their
+IO package (`ParquetFormat`, with `using Parquet2`). Other formats implement the contract of
+`AbstractTableFormat` (`table_extension`, `write_table_file`, `read_table_file`), or are given as
+functions with `TableFormat(; ext, write, read)`. TFI's tables restore as their own types only
+from formats that keep file-level metadata.
 
 ## Loading results
 
 ```julia
 rb = RunHandle("baseline")
-sol  = load(rb, :solution)     # NamedTuple (obj = ModelSolution, stv = SteadyState)
-stat = load(rb, :stats)        # returns NamedTuple{(:stats,), ...}
+sol  = load(rb, :solution)     # native copy: NamedTuple (obj = ModelSolution, stv = SteadyState)
+sol  = load(rb, :solution; solution_format = :portable, model = MyModel)   # portable copy
+stat = load(rb, :stats)        # NamedTuple of the saved properties: (stats = ...,)
 ```
 
 To load from a specific branch or experiment definition:
@@ -93,8 +111,9 @@ rb = RunHandle("baseline"; branch="feature-x", experdef="highrisk")
 sol = load(rb, :solution)
 ```
 
-Single files can be read directly: `load_solution(path)` (or with a model, or a model type, to
-rebuild the model from the stored metadata) and `load_steadystate(path)`.
+A portable load needs `model`: a model, compared with the stored metadata, or a model type, to
+rebuild the model from the stored metadata with `model_from_metadata`. Single portable files can
+be read directly with `load_solution(path, model)` and `load_steadystate(path, model)`.
 
 Components saved by OutputVault 0.1 (one `{component}.jld2` file per component) still load.
 

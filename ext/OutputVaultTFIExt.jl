@@ -1,8 +1,9 @@
 # OutputVault for TransitionFunctionIteration: writers and readers for TFI's types, and model
 # metadata for TFI models.
 #
-# Solution files: plain HDF5-compatible arrays and metadata written with JLD2, plus an exact
-# JLD2 copy of the model and the bounds. Layout (schema version 1):
+# Portable solution files: plain HDF5-compatible arrays and metadata written with JLD2, with no
+# Julia objects, so they read without the code that wrote them (the native copy, res.jld2, is
+# written by OutputVault's save_result). Layout (schema version 2):
 #   outputvault/kind (recorded by OutputVault.jld2_record)
 #   meta/{schema_version, tfi_version, created, solution_id, model_type, singletons}
 #   meta/model/... (model_metadata tree), meta/provenance/<key> (strings supplied by the caller)
@@ -10,18 +11,21 @@
 #   exogenv/points/<var>, exogenv/points/__names (variable order), exogenv/mtrans, exogenv/ssidx
 #   Pfct/<var>, Vfct/<var>, Ffct/<var>: arrays over the grid axes (Pfct in unconstrained space)
 #   Tfct/<var>: arrays over the grid axes and next period's exogenous state
-#   <fct>/__vars (variable order), Pfct/__bounds and Tfct/__bounds (bounds as text)
-#   exact/{model, Pfct_bounds, Tfct_bounds} (JLD2 objects)
+#   <fct>/__vars (variable order)
+#   Pfct/__bounds/<var>, Tfct/__bounds/<var>: [lower, upper] for each variable, plus __names
+#     (variable order). The model comes from a supplied model or model_from_metadata.
 # Steady-state files: outputvault/kind, meta/{schema_version, tfi_version, model_type}, meta/model/..., and
 # guess/, endog/, exog/, values/ (one entry per name, plus __names for the order). The model is
-# not stored: it comes from the solution file, a supplied model or model_from_metadata.
+# not stored: it comes from a supplied model or model_from_metadata.
+# The schema version changes when a change breaks readers of earlier files; the reader accepts
+# only the current version. Added entries do not change it (readers ignore unknown keys).
 # Files are written uncompressed: h5py cannot read JLD2's compressed (chunked) datasets.
-# Tables (panels, moments, IRFs) go through the config's TableFormat; their own metadata come from
+# Tables (panels, moments, IRFs) go through the config's table format; their own metadata come from
 # TFI's DataAPI interface, and OutputVault adds the storage kind.
 module OutputVaultTFIExt
 
 using OutputVault, FileIO, JLD2, StaticArrays, StructArrays
-using OutputVault: AbstractConfig, write_table, jld2_record, recorded_kind
+using OutputVault: AbstractConfig, write_table, write_table_parts, jld2_record, table_extension, read_table_file
 import OutputVault: storage_kind, write_object, read_kind, save_solution, load_solution,
                     save_steadystate, load_steadystate, model_metadata, model_from_metadata
 import TransitionFunctionIteration as TFI
@@ -30,11 +34,11 @@ using TransitionFunctionIteration: AbstractModel, ModelSolution, SteadyState, Mo
     StateSpaceGrid, Interpolant, unigrids, points, transition_matrix, ssidx, coefficients,
     varnames, dims, singletons, compare_economies
 
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 const FCTS = (:Pfct, :Vfct, :Tfct, :Ffct)
 const STV_PARTS = (:guess, :endog, :exog, :values)
 
-## compare_economies over saved runs
+## compare_economies over saved runs: the moments in each run's stats component (LAYOUT)
 
 function TFI.compare_economies(
         moments::NamedTuple,
@@ -58,20 +62,26 @@ write_object(cfg::AbstractConfig, dir, name, stv::SteadyState; provenance = Dict
 write_object(cfg::AbstractConfig, dir, name, x::Union{MomentArray, SimulationPanel, SimulationErrorPanel};
              provenance = Dict{String,String}()) =
     write_table(cfg, joinpath(dir, name), x)
+# moments by sample (describe(...).moments): one table per sample, `<sample>.<ext>`
+write_object(cfg::AbstractConfig, dir, name, s::TFI.SamplesTuple; provenance = Dict{String,String}()) =
+    write_table_parts(cfg, dir, name, s)
 # an IRF is two tables: statistics (`name`) and raw paths (`name_paths`, empty if none were saved)
 function write_object(cfg::AbstractConfig, dir, name, irf::IRFResult; provenance = Dict{String,String}())
     write_table(cfg, joinpath(dir, name), irf)
     write_table(cfg, joinpath(dir, name * "_paths"), irf_paths(irf))
 end
 
-read_kind(::kind(:ModelSolution), path) = load_solution(path)
-read_kind(::kind(:SteadyState), path) = load_steadystate(path)
+read_kind(::kind(:ModelSolution), path; model = nothing) = load_solution(path, _required_model(model, path))
+read_kind(::kind(:SteadyState), path; model = nothing) = load_steadystate(path, _required_model(model, path))
+
+_required_model(model, path) = isnothing(model) ? throw(ArgumentError(
+    "$path is a portable file without the model: load with model = <model or model type>, or read the native copy")) : model
 read_kind(::kind(:SimulationPanel), source, path, fmt) = SimulationPanel(source)
 read_kind(::kind(:SimulationErrorPanel), source, path, fmt) = SimulationErrorPanel(source)
 read_kind(::kind(:MomentArray), source, path, fmt) = MomentArray(source)
 function read_kind(::kind(:IRFResult), source, path, fmt)
-    paths = splitext(path)[1] * "_paths." * fmt.ext
-    isfile(paths) ? IRFResult(source, fmt.read(paths)) : IRFResult(source)
+    paths = splitext(path)[1] * "_paths." * table_extension(fmt)
+    isfile(paths) ? IRFResult(source, read_table_file(fmt, paths)) : IRFResult(source)
 end
 
 ## Model metadata
@@ -144,11 +154,8 @@ function save_solution(path::AbstractString, obj::ModelSolution;
             fct = getfield(obj, name)
             isnothing(fct) || write_fct(io, string(name), fct)
         end
-        io["Pfct/__bounds"] = [string(k, " = ", v) for (k, v) in pairs(obj.Pfct_bounds)]
-        io["Tfct/__bounds"] = [string(k, " = ", v) for (k, v) in pairs(obj.Tfct_bounds)]
-        io["exact/model"] = obj.model
-        io["exact/Pfct_bounds"] = obj.Pfct_bounds
-        io["exact/Tfct_bounds"] = obj.Tfct_bounds
+        write_bounds(io, "Pfct/__bounds", obj.Pfct_bounds)
+        write_bounds(io, "Tfct/__bounds", obj.Tfct_bounds)
     end
 end
 
@@ -195,9 +202,19 @@ function write_fct(io, name, fct)
     end
 end
 
-## Solution files: reading
+# bounds of each variable as [lower, upper] (±Inf where unbounded), in variable order
+function write_bounds(io, prefix, nt::NamedTuple)
+    io["$prefix/__names"] = collect(map(string, keys(nt)))
+    for (k, b) in pairs(nt)
+        io["$prefix/$k"] = bound_interval(b)
+    end
+end
+bound_interval(::TFI.Unbounded) = [-Inf, Inf]
+bound_interval(b::TFI.LowerBounded) = [Float64(b.lower), Inf]
+bound_interval(b::TFI.UpperBounded) = [-Inf, Float64(b.upper)]
+bound_interval(b::TFI.IntervalBounded) = [Float64(b.lower), Float64(b.upper)]
 
-load_solution(path::AbstractString) = jldopen(io -> rebuild(io, io["exact/model"]), path, "r")
+## Solution files: reading
 
 function load_solution(path::AbstractString, mdl::AbstractModel)
     jldopen(path, "r") do io
@@ -252,10 +269,18 @@ function rebuild(io, mdl)
     ssg = StateSpaceGrid(exogenv, NamedTuple{endog_axes}(map(a -> io["grid/$a"], endog_axes)))
     fcts = NamedTuple{FCTS}(map(name -> haskey(io, string(name)) ? read_fct(io, string(name), ssg) : nothing, FCTS))
     obj = ModelSolution(; model = mdl, exogenv, ssg, fcts.Pfct, fcts.Vfct, fcts.Tfct, fcts.Ffct,
-                          Pfct_bounds = io["exact/Pfct_bounds"], Tfct_bounds = io["exact/Tfct_bounds"])
+                          Pfct_bounds = read_bounds(io, "Pfct/__bounds"), Tfct_bounds = read_bounds(io, "Tfct/__bounds"))
     solution_id(obj) == io["meta/solution_id"] ||
         @warn "The restored solution's id differs from the stored one: the file may be corrupted"
     obj
+end
+
+read_bounds(io, prefix) = map(interval_bound, read_namedtuple(io, prefix))
+function interval_bound((lo, hi))
+    isinf(lo) && isinf(hi) && return TFI.Unbounded()
+    isinf(hi) && return TFI.LowerBounded(lo)
+    isinf(lo) && return TFI.UpperBounded(hi)
+    TFI.IntervalBounded(lo, hi)
 end
 
 # interpolant from per-variable arrays; singleton axes dropped to match the grid's points
@@ -285,16 +310,6 @@ function save_steadystate(path::AbstractString, stv::SteadyState)
     end
 end
 
-# without a model: the exact model of the one solution file in the same folder
-function load_steadystate(path::AbstractString)
-    solutions = [p for p in readdir(dirname(abspath(path)); join = true)
-                 if endswith(p, ".jld2") && recorded_kind(p) == SOLUTION_KIND]
-    length(solutions) == 1 || throw(ArgumentError(
-        "found $(length(solutions)) solution files next to $path; supply the model: load_steadystate(path, mdl)"))
-    mdl = jldopen(io -> io["exact/model"], only(solutions), "r")
-    jldopen(io -> rebuild_steadystate(io, mdl), path, "r")
-end
-
 function load_steadystate(path::AbstractString, mdl::AbstractModel)
     jldopen(path, "r") do io
         check_model(io, mdl)
@@ -310,7 +325,5 @@ function rebuild_steadystate(io, mdl)
     parts = NamedTuple{STV_PARTS}(map(part -> read_namedtuple(io, string(part)), STV_PARTS))
     SteadyState(; model = mdl, parts...)
 end
-
-const SOLUTION_KIND = "TransitionFunctionIteration.ModelSolution"
 
 end # module
