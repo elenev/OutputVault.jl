@@ -4,11 +4,14 @@ using LibGit2
 using JLD2
 using FileIO
 using Glob
+using DataAPI: DataAPI
 
-export RunHandle, Config
+export RunHandle, Config, TableFormat
 export set_config!, with_config
 export output_path
 export save_result
+export save_solution, load_solution, save_steadystate, load_steadystate
+export model_metadata, model_from_metadata
 export find_matching_results, get_results_folders
 export load  # re-exports FileIO.load (extended below)
 

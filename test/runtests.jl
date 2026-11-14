@@ -34,4 +34,6 @@ end
     include("test_git.jl")
     include("test_save_load.jl")
     include("test_discovery.jl")
+    include("tfi_fixtures.jl")
+    include("test_tfi.jl")
 end

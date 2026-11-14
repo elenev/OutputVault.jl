@@ -1,11 +1,21 @@
 [deps]
+DataAPI = "9a962f9c-6df0-11e9-0e5d-c546b8b5ee8a"
 FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 LibGit2 = "76f85450-5226-5b5a-8eaa-529ad045b433"
+Parquet2 = "98572fba-bba0-415d-956f-fa77e587d26d"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
+Tables = "bd369af6-aec1-5ad0-b16a-f7cc5008161c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+TransitionFunctionIteration = "7ca8190d-a0e2-4989-8875-c3198677b17d"
+
+[sources]
+TransitionFunctionIteration = {path = "../../TransitionFunctionIteration"}
 
 [compat]
 FileIO = "1"
-JLD2 = "0.4"
+JLD2 = "0.6"
 LibGit2 = "1"
 Test = "1"
