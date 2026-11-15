@@ -111,7 +111,7 @@
     # ── find_matching_results ─────────────────────────────────────────────────
 
     @testset "find_matching_results" begin
-        mktempdir() do root
+        with_tempdir() do root
             cfg = make_cfg(root)
 
             # empty glob returns empty NamedTuple

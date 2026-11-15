@@ -1,6 +1,6 @@
 @testset "filesystem" begin
     @testset "output_path" begin
-        mktempdir() do root
+        with_tempdir() do root
             cfg = make_cfg(root)
 
             p = OutputVault.output_path(cfg, "mybranch")
@@ -14,7 +14,7 @@
     end
 
     @testset "output_path global config wrapper" begin
-        mktempdir() do root
+        with_tempdir() do root
             cfg = make_cfg(root)
             with_config(cfg) do
                 p = output_path("wrapbranch")
@@ -25,7 +25,7 @@
     end
 
     @testset "economy_folder" begin
-        mktempdir() do root
+        with_tempdir() do root
             cfg = make_cfg(root)
             rf  = RunHandle("usa"; branch="main", experdef="base")
 
@@ -55,7 +55,7 @@
     end
 
     @testset "economy_folder global config wrapper" begin
-        mktempdir() do root
+        with_tempdir() do root
             cfg = make_cfg(root)
             rf  = RunHandle("usa"; branch="wrap", experdef="e")
             with_config(cfg) do

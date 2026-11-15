@@ -14,6 +14,18 @@
         end
     end
 
+    @testset "from a subfolder of the repository" begin
+        git_dir = make_git_repo()
+        sub = mkpath(joinpath(git_dir, "code", "pkg"))
+        write(joinpath(git_dir, "top_untracked.txt"), "x")
+        cd(sub) do
+            @test OutputVault.current_branch() isa String
+            commit_id, diffs = OutputVault.get_commit_id(:ignore)
+            @test occursin(r"^[0-9a-f]{40}$", commit_id)
+            @test occursin("top_untracked.txt", diffs.unstaged)    # untracked files repository-wide
+        end
+    end
+
     @testset "get_commit_id clean repo" begin
         git_dir = make_git_repo()
         cd(git_dir) do
@@ -55,6 +67,22 @@
                 # at least one diff should mention the new file
                 @test occursin("newfile.txt", diffs.staged) ||
                       occursin("newfile.txt", diffs.unstaged)
+            end
+        end
+
+        @testset "staged changes stay staged; untracked files are in the unstaged diff" begin
+            git_dir = make_git_repo()
+            cd(git_dir) do
+                write(joinpath(git_dir, "staged.txt"), "s")
+                run(`git -C $git_dir add staged.txt`)
+                write(joinpath(git_dir, "untracked.txt"), "u")
+                staged_before = read(`git -C $git_dir diff --staged --name-only`, String)
+                _, diffs = OutputVault.get_commit_id(:ignore)
+                @test read(`git -C $git_dir diff --staged --name-only`, String) == staged_before
+                @test occursin("staged.txt", diffs.staged)
+                @test occursin("untracked.txt", diffs.unstaged)
+                # untracked file not marked in the repository's index
+                @test !occursin("untracked.txt", read(`git -C $git_dir diff --name-only`, String))
             end
         end
 

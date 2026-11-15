@@ -1,6 +1,6 @@
 @testset "global_config" begin
-    _cfg_a = Config(; output_root="/tmp/a", components=(solution=(:x,),))
-    _cfg_b = Config(; output_root="/tmp/b", components=(solution=(:x,),))
+    _cfg_a = Config(; output_root="/tmp/a")
+    _cfg_b = Config(; output_root="/tmp/b")
 
     # helper: run f() with global config reset to nothing afterwards
     function isolated(f)

@@ -1,0 +1,47 @@
+name: Documentation
+
+# Pull requests build the docs and deploy a preview (Documenter's previews/PR<n>); the stable docs
+# deploy only when this workflow is run by hand on a release tag:
+#   gh workflow run docs.yml --ref vX.Y.Z
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: write
+  contents: write
+  statuses: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # TransitionFunctionIteration is a private repository: check it out with a read-only deploy key and
+      # move it next to this repository, where the path sources in docs/ and test/ expect it
+      - name: Check out TransitionFunctionIteration
+        uses: actions/checkout@v4
+        with:
+          repository: elenev/TransitionFunctionIteration.jl
+          ssh-key: ${{ secrets.TFI_CHECKOUT_KEY }}
+          path: tfi_checkout
+      - name: Move it next to the repository
+        shell: bash
+        run: mv tfi_checkout ../TransitionFunctionIteration
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+
+      - uses: julia-actions/cache@v2
+
+      - uses: julia-actions/julia-buildpkg@v1
+
+      - uses: julia-actions/julia-docdeploy@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
