@@ -68,11 +68,16 @@ end
 Save the properties of `result` that `LAYOUT` names, each in its component's folder under the
 economy folder for `rf`, one file per property. Which objects are saved is the caller's choice:
 properties that `result` lacks or that are `nothing` are not saved; properties outside the
-layout are ignored. Returns the economy folder path.
+layout are ignored. Returns the folder holding the results.
 
 The economy folder holds the results of one solution: a save that includes solution objects
-(`obj`, `stv`) first deletes the folder and everything in it, so that no results of an earlier
-solution remain. Saves without solution objects (e.g. IRFs computed later) add to the folder.
+(`obj`, `stv`) replaces the folder, so that no results of an earlier solution remain. The new
+results are written to `staging_root(cfg)` first, then the old folder is renamed aside, the new
+one moved into place and the old one deleted. If a step fails (on Windows, files held open, such
+as ones a load memory-mapped, block renames and deletes), nothing is lost or half-deleted: a
+warning gives the paths, the old results stay at the economy folder, and the return value is the
+staging folder holding the new results. Saves without solution objects (e.g. IRFs computed
+later) add to the economy folder.
 
 The solution is saved in the formats `solution_format(cfg)`: `:portable` writes one file per
 object (as every other component), `:native` writes all its objects to `res.jld2` with JLD2,
@@ -87,9 +92,19 @@ the latter includes untracked files). Solution objects get the commit id as prov
 function save_result(cfg::AbstractConfig, rf::RunHandle, result; dirty_repo_check::Symbol = :warn)
     saved = map(props -> filter(p -> !isnothing(_property(result, p)), props), LAYOUT)
     commit_id, diffs = get_commit_id(dirty_repo_check)
-    isempty(saved[SOLUTION_COMPONENT]) || _clear_economy_folder(cfg, rf)
-    epath = economy_folder(cfg, rf; create=true)
+    if isempty(saved[SOLUTION_COMPONENT])
+        epath = economy_folder(cfg, rf; create=true)
+        _write_components(cfg, epath, saved, result, commit_id, diffs)
+        return epath
+    end
+    final = _economy_path(cfg, rf)
+    stage = joinpath(staging_root(cfg), rf.branch, basename(final) * "-" * string(round(Int, time())))
+    _write_components(cfg, mkpath(stage), saved, result, commit_id, diffs)
+    return _replace_folder(stage, final)
+end
 
+# write each component's saved properties into the run folder `epath`
+function _write_components(cfg, epath, saved, result, commit_id, diffs)
     for (component, props) in pairs(saved)
         isempty(props) && continue
         dir = mkpath(joinpath(epath, string(component)))
@@ -104,8 +119,6 @@ function save_result(cfg::AbstractConfig, rf::RunHandle, result; dirty_repo_chec
         :native in formats &&
             jldsave(joinpath(dir, NATIVE_FILE); (p => getproperty(result, p) for p in props)...)
     end
-
-    return epath
 end
 
 save_result(rf::RunHandle, result; kwargs...) =
@@ -114,10 +127,73 @@ save_result(rf::RunHandle, result; kwargs...) =
 # property `p` of `result`, `nothing` if it has none
 _property(result, p) = hasproperty(result, p) ? getproperty(result, p) : nothing
 
-# delete the economy folder (`output_root/branch/res-{experdef}-{economy}`) if it exists
-function _clear_economy_folder(cfg, rf)
-    p = joinpath(output_path(cfg, rf.branch), "res-$(rf.experdef)-$(rf.economy)")
-    isdir(p) && rm(p; recursive=true)
+## Replacing a run's folder
+#
+# A new solution is written to a staging folder, then swapped in: the old folder is renamed aside
+# (a rename is atomic, so it either happens or changes nothing), the staged folder is moved to the
+# run's path, and the old folder is deleted. On Windows, files held open (e.g. memory-mapped by an
+# earlier load) can block a rename or a delete. Whatever fails, results are never lost and never
+# partially deleted: the run's path holds either the new results or the intact old ones, and a
+# warning says where everything is. The return value is the folder holding the new results.
+
+# `output_root/branch/res-{experdef}-{economy}`, not created
+_economy_path(cfg, rf) = joinpath(output_path(cfg, rf.branch), "res-$(rf.experdef)-$(rf.economy)")
+
+function _replace_folder(stage, final)
+    had_old = isdir(final)
+    aside = joinpath(dirname(final), ".replaced-" * basename(final) * "-" * string(round(Int, time())))
+    if had_old
+        try
+            Base.Filesystem.rename(final, aside)
+        catch err
+            return _stranded(stage, final, "the existing folder cannot be renamed", err)
+        end
+    end
+    try
+        _move_folder(stage, final)
+    catch err
+        if had_old
+            try
+                Base.Filesystem.rename(aside, final)
+            catch err2
+                return _stranded(stage, final, "the staged folder cannot be moved and the old folder cannot be restored", err2; aside)
+            end
+        end
+        return _stranded(stage, final, "the staged folder cannot be moved into place", err)
+    end
+    if had_old
+        try
+            rm(aside; recursive = true)
+        catch err
+            @warn "Results saved, but the replaced folder could not be deleted; delete it by hand\n  $aside\n  ($(sprint(showerror, err)))"
+        end
+    end
+    return final
+end
+
+# rename, or copy when the folders are on different volumes (a failed copy leaves nothing behind)
+function _move_folder(src, dst)
+    try
+        Base.Filesystem.rename(src, dst)
+    catch
+        try
+            cp(src, dst)
+        catch
+            rm(dst; recursive = true, force = true)
+            rethrow()
+        end
+        rm(src; recursive = true, force = true)
+    end
+end
+
+function _stranded(stage, final, reason, err; aside = nothing)
+    old = isnothing(aside) ? "unchanged: $final" : "renamed to $aside (nothing is at $final)"
+    @warn """RESULTS NOT AT THE RUN'S PATH: $reason.
+      new results:  $stage
+      old results:  $old
+      reason:       $(sprint(showerror, err))
+      Close whatever holds files in the old folder (on Windows: open files, a shell or Julia session in it), then move the new results into place."""
+    return stage
 end
 
 # commit id and (if any) diffs as text files; returns the commit id as provenance for the objects

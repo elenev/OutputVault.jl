@@ -4,7 +4,7 @@
 
 @testset "Run lifecycle across processes" begin
     git_dir = make_git_repo()
-    mktempdir() do root
+    with_tempdir() do root
         cfg = Config(; output_root = root, table_format = PARQUET)
         rf = RunHandle("base"; branch = "main", experdef = "demo")
         saved_stats = describe(simseries).moments

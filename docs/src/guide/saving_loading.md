@@ -18,6 +18,8 @@ cfg = Config(
 - `table_format`: how tables (simulations, moments, IRFs) are stored; see [Table Formats](@ref).
   Without one, saving a table is an error that says so.
 - `solution_format`: which copies of the solution to save ([Runs and the Layout](@ref)).
+- `staging_root`: where a replacing solution is written before it is moved into place (default: a
+  folder in the system temp directory); see [Replacing a run](@ref).
 
 Every function that needs a configuration takes one as its first argument, and has a form
 without it that uses the active configuration. A package or script sets it once:
@@ -52,6 +54,22 @@ save_result(rf, (; claims))                        # a recursion computed later
 A save with `obj` or `stv` replaces the run's folder ([Runs and the Layout](@ref)). The keyword
 `dirty_repo_check` (`:warn`, the default; `:error`; or `:ignore`) controls what happens when the
 repository has uncommitted changes.
+
+### Replacing a run
+
+A save with `obj` or `stv` writes the new results to `staging_root` first. It then renames the old
+run folder to `.replaced-<folder>-<time>` next to it, moves the staged folder into place and deletes
+the renamed one. On Windows, a file held open blocks renames and deletes of its folder, and
+Parquet2 keeps the files it has read memory-mapped until Julia's garbage collector has run, so a
+load followed closely by a save can hit this. Nothing is lost or half-deleted when it does:
+
+- If the old folder cannot be renamed, it stays intact at the run's path, the new results stay in
+  `staging_root`, a warning gives both paths, and `save_result` returns the staging path.
+- If only the final delete fails, the new results are in place and a warning names the leftover
+  `.replaced-*` folder, which discovery and DuckDB ignore. Delete it by hand.
+
+The cure is to release whatever holds the files (close handles, leave the folder as the working
+directory, let the garbage collector run) and move the staged folder into place.
 
 ## Loading
 

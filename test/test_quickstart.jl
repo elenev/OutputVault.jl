@@ -19,7 +19,7 @@ OutputVault.read_kind(::Val{Symbol("OutputVaultTests.QSummary")}, source, path, 
 
 @testset "Quick start without a model" begin
     git_dir = make_git_repo()
-    mktempdir() do root
+    with_tempdir() do root
         cfg = Config(; output_root = root, table_format = PARQUET)
         rf = RunHandle("base"; branch = "main", experdef = "v1")
         folder = joinpath(root, "main", "res-v1-base")

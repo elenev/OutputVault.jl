@@ -19,7 +19,7 @@ OutputVault.read_kind(::Val{Symbol("OutputVaultTests.Kinded")}, path; model = no
 @testset "save_load" begin
     git_dir = make_git_repo()
 
-    mktempdir() do root
+    with_tempdir() do root
         cfg = make_cfg(root)
         rf  = RunHandle("usa"; branch="testbranch", experdef="base")
         res = _TestResult(3.14, 7, 42, "ignored")

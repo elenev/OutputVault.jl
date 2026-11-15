@@ -12,7 +12,7 @@ using DuckDB
 
     samples = describe(simseries; filters = (a_all = Returns(true),)).moments
     irf = simulate_irf(obj, simseries; shocks = (pos = 2, uncond = Int64[]), T = 5, N = 20)
-    mktempdir() do root
+    with_tempdir() do root
         cfg = Config(; output_root = root, table_format = PARQUET)
         cd(git_dir) do
             save_result(cfg, RunHandle("frm_init-a"; branch = "feat/nested", experdef = "base"),
@@ -68,7 +68,7 @@ using DuckDB
     end
 
     # moments read from the saved runs: the same table as from the results in memory
-    mktempdir() do root
+    with_tempdir() do root
         cfg = Config(; output_root = root, table_format = PARQUET)
         cd(git_dir) do
             save_result(cfg, RunHandle("ngm"; branch = "main", experdef = "alt"),

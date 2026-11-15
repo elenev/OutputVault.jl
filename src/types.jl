@@ -133,6 +133,9 @@ table_format(cfg::AbstractConfig) = nothing
 # Optional — how the solution is saved
 solution_format(cfg::AbstractConfig) = (:portable, :native)
 
+# Optional — where a replacing solution is written before it is moved into place (see `save_result`)
+staging_root(cfg::AbstractConfig) = joinpath(tempdir(), "OutputVault")
+
 const SOLUTION_FORMATS = (:portable, :native)
 
 # a format or tuple of formats as a tuple of known formats
@@ -149,10 +152,12 @@ struct Config{F <: Union{Nothing, AbstractTableFormat}} <: AbstractConfig
     output_root::String
     table_format::F
     solution_format::Tuple{Vararg{Symbol}}
+    staging_root::String
 end
 
 """
-    Config(; output_root, table_format=nothing, solution_format=(:portable, :native))
+    Config(; output_root, table_format=nothing, solution_format=(:portable, :native),
+             staging_root=joinpath(tempdir(), "OutputVault"))
 
 A project's OutputVault settings. Where each object goes is fixed (`LAYOUT`); which objects are
 saved is chosen in each `save_result` call.
@@ -165,15 +170,20 @@ saved is chosen in each `save_result` call.
   layout of plain arrays, readable without the code that wrote it), `:native` (all of the
   solution's objects in one JLD2 file, `res.jld2`, exactly as they are in Julia), or both. Other
   components are always portable.
+- `staging_root`: where `save_result` writes a replacing solution before moving it into place. If
+  the move cannot be made (on Windows, files held open block it), the results stay here. Default:
+  a folder in the system temp directory.
 """
 function Config(;
     output_root::String,
     table_format::F       = nothing,
     solution_format       = (:portable, :native),
+    staging_root::String  = joinpath(tempdir(), "OutputVault"),
 ) where {F <: Union{Nothing, AbstractTableFormat}}
-    Config{F}(output_root, table_format, _solution_format_tuple(solution_format))
+    Config{F}(output_root, table_format, _solution_format_tuple(solution_format), staging_root)
 end
 
 output_root(cfg::Config)     = cfg.output_root
 table_format(cfg::Config)    = cfg.table_format
 solution_format(cfg::Config) = cfg.solution_format
+staging_root(cfg::Config)    = cfg.staging_root

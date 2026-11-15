@@ -92,7 +92,7 @@ end
     irf = simulate_irf(obj, simseries; shocks = (pos = 2,), path_vars = (:K,), T = 5, N = 20)
     result = (; obj, stv, stats, errstats, simseries, errs, irf, params = collect_parameters(obj))
 
-    mktempdir() do root
+    with_tempdir() do root
         cfg = Config(; output_root = root, table_format = PARQUET)
         rf = RunHandle("ngm"; branch = "testbranch", experdef = "base")
         cd(git_dir) do
@@ -227,7 +227,7 @@ end
 
 
 @testset "TFI: Interpolant files record provenance" begin
-    mktempdir() do dir
+    with_tempdir() do dir
         cfg = make_cfg(dir)
         OutputVault.write_object(cfg, dir, "fct", obj.Vfct; provenance = Dict("git_commit_id" => "abc123", "branch" => "main"))
         path = joinpath(dir, "fct.jld2")

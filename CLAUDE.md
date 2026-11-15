@@ -87,8 +87,15 @@ afterwards. The repository's index is never modified. A diff over 1 MB is droppe
 ## I/O (save_load.jl)
 
 `save_result(cfg, rf, result; dirty_repo_check = :warn)`: keeps the properties of `result` that
-`LAYOUT` names and that are not `nothing`; if any of them is in `solution`, deletes the run folder;
-then per component: makes the folder, for `solution` writes the git files and passes
+`LAYOUT` names and that are not `nothing`; if any of them is in `solution`, writes everything to a
+staging folder (`staging_root(cfg)`, default `tempdir()/OutputVault`) and swaps it in
+(`_replace_folder`: rename the old folder to `.replaced-<name>-<ts>`, move the staged one in, delete
+the old one; decided 2026-11-15). On Windows open or memory-mapped files block renames/deletes; a
+failure never loses or half-deletes results: the run's path holds the intact old results and the new
+ones stay in staging, with one `_stranded` warning listing all paths, and `save_result` returns the
+staging path. A leftover `.replaced-*` folder only warns (no cleanup on later saves; discovery and
+DuckDB match `res-*` and ignore it). Otherwise (no solution objects) it writes in place. Per component:
+makes the folder, for `solution` writes the git files and passes
 `provenance = Dict("git_commit_id" => id)` to `write_object`, and for each property calls
 `write_object(cfg, dir, string(p), getproperty(result, p); provenance)`. `solution` also gets
 `res.jld2` (all its objects, `jldsave`) if `:native` is in `solution_format`; other components are
