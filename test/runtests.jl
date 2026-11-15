@@ -31,5 +31,7 @@ end
     include("test_discovery.jl")
     include("tfi_fixtures.jl")
     include("test_tfi.jl")
+    include("test_lifecycle.jl")
+    include("test_quickstart.jl")
     include("test_duckdb.jl")
 end

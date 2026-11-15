@@ -38,14 +38,17 @@ const SCHEMA_VERSION = 2
 const FCTS = (:Pfct, :Vfct, :Tfct, :Ffct)
 const STV_PARTS = (:guess, :endog, :exog, :values)
 
-## compare_economies over saved runs: the moments in each run's stats component (LAYOUT)
+## compare_economies over saved runs: each run's stats component (and its IRFs if a moment needs them)
 
 function TFI.compare_economies(
         moments::NamedTuple,
         economies::NamedTuple{K, NTuple{N, OutputVault.RunHandle}} where {K, N};
         kwargs...)
-    stats = map(e -> FileIO.load(e, :stats).stats, economies)
-    return compare_economies(moments, stats; kwargs...)
+    needs_irf = any(m -> m isa TFI.ImpulseMoment, values(moments))
+    results = map(economies) do e
+        TFI.EconomyResults(FileIO.load(e, :stats).stats, needs_irf ? FileIO.load(e, :irf).irf : nothing)
+    end
+    return compare_economies(moments, results; kwargs...)
 end
 
 ## Storage kinds, writers and readers

@@ -95,6 +95,12 @@ using DuckDB
         @test via_root.data == compare_economies(moments, (ngm = memory, ngm2 = memory)).data
         @test via_root.data == compare_economies(moments, economies, table).data
         @test_throws KeyError compare_economies((x = SimulationMoment(:K; stat = :p99),), (:ngm,), root)
+        # the same over RunHandles of the active configuration, reading the IRFs for impulse moments
+        runs = (ngm = RunHandle("ngm"; branch = "main", experdef = "alt"), ngm2 = RunHandle("ngm2"; branch = "main", experdef = "alt"))
+        via_handles = with_config(cfg) do
+            compare_economies(moments, runs)
+        end
+        @test via_handles.data == compare_economies(moments, (ngm = memory, ngm2 = memory)).data
     end
 
     # Windows separators in the root and the file path

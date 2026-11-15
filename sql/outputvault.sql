@@ -2,7 +2,7 @@
 --
 -- Load this file into a DuckDB connection, then query the table macros with the output root
 -- (the `output_root` of the project's OutputVault Config), for example
---   SELECT * FROM vault_stats('/path/to/output_root', experdef := '20261114') WHERE economy = 'frm';
+--   SELECT * FROM vault_stats('/path/to/output_root', experdef := 'v1') WHERE economy = 'base';
 -- Statements are separated by ';' at the end of a line; clients that run one statement per call
 -- (DuckDB.jl) run them one by one (OutputVault.duckdb_statements() returns them).
 --
@@ -23,11 +23,11 @@
 -- Filtering files: every macro takes the named arguments branch_glob and experdef_glob (glob
 -- patterns, default '**' and '*'), which narrow the files that are read, so that only matching runs
 -- are opened (this matters when the root is a synced folder with online-only files),
---   SELECT * FROM vault_stats('/root', branch_glob := 'houseshock', experdef_glob := '20261114');
+--   SELECT * FROM vault_stats('/root', branch_glob := 'main', experdef_glob := 'v1');
 -- vault_stats, vault_errstats, vault_params, vault_irf and vault_simulation also take economies, a
 -- list of economy glob patterns (default ['*']); each pattern must match a saved component of some
 -- run, or DuckDB reports that no files match,
---   SELECT * FROM vault_stats('/root', economies := ['frm', 'arm']);
+--   SELECT * FROM vault_stats('/root', economies := ['base', 'alt']);
 --
 -- Splitting economy: pass the globs (all five arguments are then positional) and a regex with one
 -- capture group per part and the names of the parts,

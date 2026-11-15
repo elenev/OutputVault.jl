@@ -1,183 +1,132 @@
 # OutputVault.jl
 
-## Problem
+One place on disk for the results of every run of a research model, the same place for every
+project, with the code that produced them recorded next to them.
 
-Research model runs produce output across many git branches, experiment
-definitions, and parameter configurations. It is easy to lose track of which
-code version produced a given set of results, especially when runs are long and
-the output directory accumulates results from many development cycles.
+Model runs pile up across git branches, experiment definitions and variants of the model, and it is
+easy to lose track of which code produced which numbers. OutputVault gives each run a folder,
+saves a solution, its simulation, moments and impulse responses into it in plain files, and
+records the git commit (and, if the repository was dirty, the diffs) with the solution.
 
-## Approach
+```
+<output_root>/<branch>/res-<experdef>-<economy>/
+├── solution/     obj.jld2  stv.jld2  res.jld2  git_commit.txt  [git_*.diff]
+├── stats/        uncond.parquet            moments by sample
+├── errstats/     errstats.parquet          equation errors
+├── simulation/   simseries.parquet  errs.parquet
+├── irf/          irf.parquet  irf_paths.parquet
+├── params/       params.parquet            the model's scalar parameters
+└── recursions/   claims.jld2  welfare.jld2
+```
 
-OutputVault organizes outputs under a configurable root directory:
-`branch/res-{experdef}-{economy}/{component}/{property}.{ext}`. Where each object goes is fixed
-for every project (`LAYOUT`), so tools such as `compare_economies` find objects in any run:
+What makes it useful:
 
-| component    | properties                                          |
-|:-------------|:----------------------------------------------------|
-| `solution`   | `obj`, `stv`                                        |
-| `stats`      | `stats` (the moments `compare_economies` compares)  |
-| `errstats`   | `errstats`                                          |
-| `simulation` | `simseries`, `errs`                                 |
-| `irf`        | `irf`                                               |
+- **The layout is fixed.** Every project and every user has the same components and objects, so
+  tools find results in any run without knowing the project.
+- **A folder is one solution.** Saving a new solution replaces the run's folder, so results of
+  different solutions never mix. Everything else can be added to a run later.
+- **Plain files.** Solutions are plain arrays and metadata in HDF5-compatible files; tables are
+  Parquet with metadata that says what they are and where they came from. Python, R, MATLAB and
+  DuckDB read them without Julia code, and a SQL layer queries all runs at once.
+- **Provenance.** The solution folder holds the commit id and the staged and unstaged diffs
+  (including untracked files), computed without touching the repository's index.
+- **Light, extensible core.** The core knows nothing about particular model packages or file formats.
+  Each is a package extension that loads with its package.
 
-Moments by sample (`describe(simseries).moments`) are saved one table per sample,
-`stats/<sample>.<ext>`; each file records its position, so loading returns the samples in order.
+| Extension | Loads with | Provides |
+|:--|:--|:--|
+| `OutputVaultTFIExt` | TransitionFunctionIteration, StaticArrays, StructArrays | storage of TFI's solutions, steady states, simulations, moments, IRFs and interpolants |
+| `OutputVaultParquet2Ext` | Parquet2 | `Formats.ParquetFormat`: tables as Parquet files |
+| `OutputVaultDuckDBExt` | DuckDB, Tables, TransitionFunctionIteration | `assemble_moments`, `compare_economies` over saved runs |
 
-Which objects are saved is chosen in each call: `save_result` saves the properties of the result
-that the layout names, skipping missing or `nothing` ones and ignoring the rest. The solution
-folder also receives the commit ID (`git_commit.txt`) and, for a dirty repository, the staged
-and unstaged diffs (`git_staged.diff`, `git_unstaged.diff`, including untracked files). The
-diffs are computed without touching the repository's index.
+Another solution package or table format adds its own extension through the same interfaces
+(`storage_kind`, `write_object`, `read_kind`; `AbstractTableFormat`); see the documentation.
 
-The solution is saved in two formats by default (`solution_format = (:portable, :native)`).
-The native copy, `solution/res.jld2`, holds the solution's objects exactly as they are in Julia:
-quick to load, but it needs code compatible with the code that wrote it, so it is meant for work
-done soon after the solve. The portable copy is one file per object in a documented layout of
-plain data, meant for long-term storage. Other components are always portable.
+## Example
 
-Portable objects are stored by type. With TransitionFunctionIteration loaded, a
-`ModelSolution` goes to an HDF5-compatible JLD2 file of plain arrays and metadata, a
-`SteadyState` to plain data, and simulations, error panels, moment tables and IRFs to tables in a format the
-project chooses, with their provenance in the file's metadata. Other objects are stored with
-JLD2. Loading returns each object as its own type.
+The configuration, run identity and saving are independent of any model package:
 
-Project settings (output root, table format, solution format) are set in a `Config` struct. For library authors who need more flexibility, the
-`AbstractConfig` interface allows dispatch-based customization. The active
-config is registered globally via `set_config!`, typically in the host
-package's `__init__`, so downstream code calls `save_result` and `load`
-without threading a config argument through the call stack.
+```julia
+using OutputVault, Parquet2
+
+set_config!(Config(
+    output_root  = "/path/to/outputs",
+    table_format = OutputVault.Formats.ParquetFormat(),
+))
+
+rf = RunHandle("base"; experdef = "v1")        # branch: the current git branch
+save_result(rf, (; obj, stats))                # whatever the layout names; run inside a git repository
+save_result(rf, (; irf))                       # later: adds to the run
+load(rf, :stats).stats                         # NamedTuple of the saved objects, each as its own type
+```
+
+The documentation's Quick Start runs this with a tiny table type, no model needed, including a
+DuckDB query. With TransitionFunctionIteration, the result of `solve_and_simulate` is already in the
+right shape:
+
+```julia
+using TransitionFunctionIteration
+result = solve_and_simulate(mdl)
+save_result(rf, merge(result, (; params = collect_parameters(result.obj))))
+```
+
+Then, from any language with DuckDB (the macros are `sql/outputvault.sql`):
+
+```sql
+SELECT economy, variable, value
+FROM vault_stats('/path/to/outputs', experdef_glob := 'v1')
+WHERE sample = 'uncond' AND stat = 'mean';
+```
+
+> **Load what you use.** Extensions activate when their packages are loaded: `using Parquet2` for
+> tables, `using TransitionFunctionIteration` (with StaticArrays and StructArrays, which it loads) for
+> TFI's types, `using DuckDB, Tables` for `assemble_moments`. A missing one shows up as a message that
+> names the package or a method that does not exist; the documentation has a troubleshooting table.
+>
+> **Saving a solution replaces the run's folder.** A `save_result` with `obj` or `stv` first deletes
+> everything saved for that run (simulation, statistics, IRFs, parameters, recursions), so re-save
+> what you still need. Saves without them add to the run.
+>
+> **Branch and git record come from the working directory.** `RunHandle` defaults to the current
+> branch of the repository the process runs in, and `solution/` records that repository's commit and
+> diffs, not those of the output root or the model. Start Julia from the model's repository or pass
+> `branch = ...`.
+
+Then, from any language with DuckDB (the macros are `sql/outputvault.sql`):
+
+```sql
+SELECT economy, variable, value
+FROM vault_stats('/path/to/outputs', experdef_glob := 'v1')
+WHERE sample = 'uncond' AND stat = 'mean';
+```
+
+## Documentation
+
+A model-free quick start, a step-by-step lifecycle with a real model (solve and save, fresh-process
+reload, warm start, late results, comparison),
+guides on the layout, saving and loading, TransitionFunctionIteration objects and file layouts, table
+formats, DuckDB, and writing an extension, and the API reference, are in `docs/`. Build them with
+
+```
+julia --project=docs docs/make.jl
+```
 
 ## Installation
 
 ```julia
 using Pkg
-Pkg.add(url="git@github.com:elenev/OutputVault.jl.git")
+Pkg.add(url = "git@github.com:elenev/OutputVault.jl.git")
 ```
 
-## Saving results
+Julia 1.9 or later. Add the packages of the extensions you use.
 
-Configure the vault in your package's `__init__` (or at the top of a script):
+## Status
 
-```julia
-import OutputVault
+Version 0.2.0, not yet released. The file layouts are versioned: a solution file records its schema
+version and the reader accepts only the current one. Components saved by OutputVault 0.1 (one
+`<component>.jld2` file each) still load.
 
-function __init__()
-    OutputVault.set_config!(OutputVault.Config(
-        output_root     = "/path/to/outputs",
-        table_format    = OutputVault.Formats.ParquetFormat(),   # needs `using Parquet2`
-        solution_format = (:portable, :native),   # default; or :portable or :native alone
-    ))
-end
-```
+## Development
 
-Then save a result whose properties are named in the layout:
-
-```julia
-using OutputVault
-
-rb = RunHandle("baseline")               # branch defaults to current git branch
-save_result(rb, (; obj, stv, stats, errstats, simseries, errs))   # everything
-save_result(rb, (; obj, stv, stats, errstats))                    # without the simulation
-```
-
-A save that includes solution objects replaces the run's folder: everything saved earlier for
-that run is deleted first, so the folder never mixes results of different solutions. Saves
-without solution objects (e.g. IRFs computed later) add to the folder.
-
-`save_result` warns (or errors, if `dirty_repo_check=:error`) when the
-repository has uncommitted changes, and stores the diffs alongside the commit
-ID in the solution folder.
-
-Tables need a `table_format`. Built-in formats are in `OutputVault.Formats` and load with their
-IO package (`ParquetFormat`, with `using Parquet2`). Other formats implement the contract of
-`AbstractTableFormat` (`table_extension`, `write_table_file`, `read_table_file`), or are given as
-functions with `TableFormat(; ext, write, read)`. TFI's tables restore as their own types only
-from formats that keep file-level metadata.
-
-## Loading results
-
-```julia
-rb = RunHandle("baseline")
-sol  = load(rb, :solution)     # native copy: NamedTuple (obj = ModelSolution, stv = SteadyState)
-sol  = load(rb, :solution; solution_format = :portable, model = MyModel)   # portable copy
-stat = load(rb, :stats)        # NamedTuple of the saved properties: (stats = ...,)
-```
-
-To load from a specific branch or experiment definition:
-
-```julia
-rb = RunHandle("baseline"; branch="feature-x", experdef="highrisk")
-sol = load(rb, :solution)
-```
-
-A portable load needs `model`: a model, compared with the stored metadata, or a model type, to
-rebuild the model from the stored metadata with `model_from_metadata`. Single portable files can
-be read directly with `load_solution(path, model)` and `load_steadystate(path, model)`.
-
-Components saved by OutputVault 0.1 (one `{component}.jld2` file per component) still load.
-
-## Querying outputs with DuckDB
-
-`sql/outputvault.sql` (path: `duckdb_sql_path()`) defines DuckDB table macros over an output
-root, for analysis in any language with a DuckDB client. They take the root as an argument, so
-the file is the same on every machine:
-
-| macro                    | columns                                                       |
-|:-------------------------|:--------------------------------------------------------------|
-| `vault_stats(root)`      | `branch, experdef, economy, sample, variable, stat, value`    |
-| `vault_errstats(root)`   | `branch, experdef, economy, equation, stat, value`            |
-| `vault_params(root)`     | `branch, experdef, economy, parameter, value`                 |
-| `vault_irf(root)`        | `branch, experdef, economy, shock, stat, period, variable, value` |
-| `vault_simulation(root)` | `branch, experdef, economy`, then the panel's columns         |
-| `vault_runs(root)`       | `branch, experdef, economy`                                   |
-
-Every macro takes the named arguments `branch_glob` (default `'**'`) and `experdef_glob`
-(default `'*'`), glob patterns that narrow the files that are read; with a synced root of
-online-only files this keeps downloads to the runs you ask for:
-
-```sql
-SELECT * FROM vault_stats('/path/to/output_root', branch_glob := 'houseshock', experdef_glob := '20261114');
-```
-
-The run identity comes from the folder names, so `experdef` must not contain `-` (`RunHandle`
-enforces it); `economy` may contain anything. OutputVault imposes no convention on economy names.
-To split them into columns, pass all five arguments, the last two a regex with one group per part
-and the parts' names:
-
-```sql
-SELECT * FROM vault_stats('/path/to/output_root', '**', '*', '^([^_]+)(?:_(.+))?$', ['model', 'scheme'])
-WHERE variable = 'K' AND stat = 'mean';
-```
-
-Python: `con.execute(open(path).read())`. DuckDB.jl runs one statement per call:
-
-```julia
-using DuckDB, OutputVault
-con = DBInterface.connect(DuckDB.DB)
-foreach(s -> DBInterface.execute(con, s), duckdb_statements())
-DBInterface.execute(con, "SELECT * FROM vault_stats('$root')")
-```
-
-## Storing other packages' types
-
-A package can have its types stored in formats of its own: define `OutputVault.storage_kind`
-for them (a namespaced string), `OutputVault.write_object` methods that write through
-`OutputVault.write_table` or `OutputVault.jld2_record` (which record the kind), and
-`OutputVault.read_kind` methods that restore them. The TransitionFunctionIteration extension is
-built this way.
-
-## Moments of saved runs (DuckDB and TransitionFunctionIteration loaded)
-
-`assemble_moments(root, moments; branch, experdef, economies)` reads the statistics that TFI
-moment specifications (`SimulationMoment`, `ImpulseMoment`) name from the saved runs, with one
-DuckDB query per kind of moment, and returns the long table that TFI's
-`compare_economies(moments, economy_names, table)` reads. `compare_economies(moments,
-economy_names, root; branch, experdef)` does both steps. The model's parameters are saved in the
-`params` component: `save_result(rf, (; params = collect_parameters(obj)))`; the default takes
-every scalar real or Boolean field of the model.
-
-The `recursions` component holds interpolants computed at a solution's policies (`claims`, `welfare`,
-one file each, `recursions/<name>.jld2`, with their grid so they load without the solution). Saving
-them never touches the solution component, so they can be computed and saved later.
-
+`julia --project=. -e 'using Pkg; Pkg.test()'` runs the tests, which save and load every supported
+type through a temporary root and a throwaway git repository. `CLAUDE.md` has the maintainer notes.

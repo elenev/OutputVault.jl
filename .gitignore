@@ -29,3 +29,5 @@ JuliaLocalPreferences.toml
 
 # Coverage
 coverage
+# macOS
+.DS_Store
