@@ -28,12 +28,15 @@ src/
   duckdb.jl        -- duckdb_sql_path, duckdb_statements (the SQL is sql/outputvault.sql)
 sql/
   outputvault.sql  -- DuckDB table macros over an output root (vault_stats, vault_errstats,
-                      vault_simulation, vault_runs); run identity parsed from folder names
+                      vault_params, vault_irf, vault_simulation, vault_runs); run identity parsed from folder names
 ext/
   OutputVaultTFIExt.jl -- extension (triggers: TFI, StaticArrays, StructArrays,
                           all loaded with TFI): writers/readers for TFI types,
                           solution and steady-state file layouts, model_metadata
-                          for TFI models, compare_economies over RunHandles
+                          for TFI models, compare_economies over RunHandles,
+                          collect_parameters (default params), `variable` row key
+  OutputVaultDuckDBExt.jl -- extension (DuckDB, Tables, TFI): assemble_moments, and
+                          compare_economies over an output root
 ```
 
 ## Key types

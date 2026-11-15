@@ -127,15 +127,26 @@ the file is the same on every machine:
 |:-------------------------|:--------------------------------------------------------------|
 | `vault_stats(root)`      | `branch, experdef, economy, sample, variable, stat, value`    |
 | `vault_errstats(root)`   | `branch, experdef, economy, variable, stat, value`            |
+| `vault_params(root)`     | `branch, experdef, economy, parameter, value`                 |
+| `vault_irf(root)`        | `branch, experdef, economy, shock, stat, period, variable, value` |
 | `vault_simulation(root)` | `branch, experdef, economy`, then the panel's columns         |
 | `vault_runs(root)`       | `branch, experdef, economy`                                   |
 
-The run identity comes from the folder names, so `experdef` must not contain `-` (`RunHandle`
-enforces it); `economy` may contain anything. OutputVault imposes no convention on economy names.
-To split them into columns, pass a regex with one group per part and the parts' names:
+Every macro takes the named arguments `branch_glob` (default `'**'`) and `experdef_glob`
+(default `'*'`), glob patterns that narrow the files that are read; with a synced root of
+online-only files this keeps downloads to the runs you ask for:
 
 ```sql
-SELECT * FROM vault_stats('/path/to/output_root', '^([^_]+)(?:_(.+))?$', ['model', 'scheme'])
+SELECT * FROM vault_stats('/path/to/output_root', branch_glob := 'houseshock', experdef_glob := '20261114');
+```
+
+The run identity comes from the folder names, so `experdef` must not contain `-` (`RunHandle`
+enforces it); `economy` may contain anything. OutputVault imposes no convention on economy names.
+To split them into columns, pass all five arguments, the last two a regex with one group per part
+and the parts' names:
+
+```sql
+SELECT * FROM vault_stats('/path/to/output_root', '**', '*', '^([^_]+)(?:_(.+))?$', ['model', 'scheme'])
 WHERE variable = 'K' AND stat = 'mean';
 ```
 
@@ -155,3 +166,18 @@ for them (a namespaced string), `OutputVault.write_object` methods that write th
 `OutputVault.write_table` or `OutputVault.jld2_record` (which record the kind), and
 `OutputVault.read_kind` methods that restore them. The TransitionFunctionIteration extension is
 built this way.
+
+## Moments of saved runs (DuckDB and TransitionFunctionIteration loaded)
+
+`assemble_moments(root, moments; branch, experdef, economies)` reads the statistics that TFI
+moment specifications (`SimulationMoment`, `ImpulseMoment`) name from the saved runs, with one
+DuckDB query per kind of moment, and returns the long table that TFI's
+`compare_economies(moments, economy_names, table)` reads. `compare_economies(moments,
+economy_names, root; branch, experdef)` does both steps. The model's parameters are saved in the
+`params` component: `save_result(rf, (; params = collect_parameters(obj)))`; the default takes
+every scalar real or Boolean field of the model.
+
+The `recursions` component holds interpolants computed at a solution's policies (`claims`, `welfare`,
+one file each, `recursions/<name>.jld2`, with their grid so they load without the solution). Saving
+them never touches the solution component, so they can be computed and saved later.
+
