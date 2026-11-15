@@ -59,9 +59,10 @@ end
 end
 
 @testset "LAYOUT" begin
-    @test keys(LAYOUT) == (:solution, :stats, :errstats, :simulation, :irf)
+    @test keys(LAYOUT) == (:solution, :stats, :errstats, :simulation, :irf, :params, :recursions)
     @test LAYOUT.solution == (:obj, :stv) && LAYOUT.stats == (:stats,) && LAYOUT.errstats == (:errstats,)
     @test OutputVault.layout_properties(:simulation) == (:simseries, :errs)
+    @test OutputVault.layout_properties(:recursions) == (:claims, :welfare)
     @test_throws ArgumentError OutputVault.layout_properties(:other)
 end
 

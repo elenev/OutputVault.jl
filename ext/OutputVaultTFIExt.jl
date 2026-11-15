@@ -50,7 +50,7 @@ end
 
 ## Storage kinds, writers and readers
 
-const STORED_TYPES = Union{ModelSolution, SteadyState, MomentArray, SimulationPanel, SimulationErrorPanel, IRFResult}
+const STORED_TYPES = Union{ModelSolution, SteadyState, MomentArray, SimulationPanel, SimulationErrorPanel, IRFResult, Interpolant}
 storage_kind(x::STORED_TYPES) = "TransitionFunctionIteration." * string(nameof(typeof(x)))
 # the kind of a stored type by name, as dispatched on by read_kind
 kind(name) = Val{Symbol("TransitionFunctionIteration.", name)}
@@ -59,16 +59,51 @@ write_object(cfg::AbstractConfig, dir, name, obj::ModelSolution; provenance = Di
     save_solution(joinpath(dir, name * ".jld2"), obj; provenance)
 write_object(cfg::AbstractConfig, dir, name, stv::SteadyState; provenance = Dict{String,String}()) =
     save_steadystate(joinpath(dir, name * ".jld2"), stv)
-write_object(cfg::AbstractConfig, dir, name, x::Union{MomentArray, SimulationPanel, SimulationErrorPanel};
+write_object(cfg::AbstractConfig, dir, name, x::Union{SimulationPanel, SimulationErrorPanel};
              provenance = Dict{String,String}()) =
     write_table(cfg, joinpath(dir, name), x)
+# moments are written with the row names in a column called `variable` (TFI's default is `__row`);
+# the file's metadata records the name, so reading needs no argument
+const ROW_KEY = :variable
+storage_kind(k::TFI.KeyedMomentArray) = storage_kind(k.moments)
+write_object(cfg::AbstractConfig, dir, name, x::MomentArray; provenance = Dict{String,String}()) =
+    write_table(cfg, joinpath(dir, name), TFI.with_rowkey(x, ROW_KEY))
 # moments by sample (describe(...).moments): one table per sample, `<sample>.<ext>`
 write_object(cfg::AbstractConfig, dir, name, s::TFI.SamplesTuple; provenance = Dict{String,String}()) =
-    write_table_parts(cfg, dir, name, s)
+    write_table_parts(cfg, dir, name, map(m -> TFI.with_rowkey(m, ROW_KEY), s))
 # an IRF is two tables: statistics (`name`) and raw paths (`name_paths`, empty if none were saved)
 function write_object(cfg::AbstractConfig, dir, name, irf::IRFResult; provenance = Dict{String,String}())
     write_table(cfg, joinpath(dir, name), irf)
     write_table(cfg, joinpath(dir, name * "_paths"), irf_paths(irf))
+end
+
+# an Interpolant over a state-space grid (e.g. recursions computed at a solution's policies): its grid
+# and one array per variable, as in a solution file, so that it loads without the solution
+function write_object(cfg::AbstractConfig, dir, name, fct::Interpolant; provenance = Dict{String,String}())
+    jld2_record(joinpath(dir, name * ".jld2"), fct) do io
+        io["meta/schema_version"] = SCHEMA_VERSION
+        io["meta/tfi_version"] = TFI.tfi_version()
+        io["meta/created"] = Libc.strftime("%Y-%m-%dT%H:%M:%S", time())
+        for (k, v) in provenance
+            io["meta/provenance/$k"] = string(v)
+        end
+        write_grid(io, fct.ssg)
+        write_fct(io, "fct", fct)
+    end
+end
+
+function read_kind(::kind(:Interpolant), path; model = nothing)
+    jldopen(path, "r") do io
+        check_schema(io)
+        read_fct(io, "fct", read_grid(io))
+    end
+end
+
+# the grid of a file: the exogenous axis is the indices 1:n (as StateSpaceGrid(exogenv, ...) builds it)
+function read_grid(io)
+    axes = Tuple(Symbol(a) for a in io["grid/__axes"])
+    grids = NamedTuple{axes}(map(a -> a == :exst ? (1:length(io["grid/exst"])) : io["grid/$a"], axes))
+    StateSpaceGrid(grids)
 end
 
 read_kind(::kind(:ModelSolution), path; model = nothing) = load_solution(path, _required_model(model, path))
@@ -83,6 +118,16 @@ function read_kind(::kind(:IRFResult), source, path, fmt)
     paths = splitext(path)[1] * "_paths." * table_extension(fmt)
     isfile(paths) ? IRFResult(source, read_table_file(fmt, paths)) : IRFResult(source)
 end
+
+## Model parameters: the default `params` object
+
+# every scalar real or Boolean field of the model, one row each, in one column `value`
+function OutputVault.collect_parameters(mdl::AbstractModel)
+    names = Tuple(f for f in fieldnames(typeof(mdl)) if getfield(mdl, f) isa Real)
+    values = Float64[getfield(mdl, f) for f in names]
+    return MomentArray(reshape(values, :, 1), names, (:value,))
+end
+OutputVault.collect_parameters(obj::ModelSolution) = OutputVault.collect_parameters(obj.model)
 
 ## Model metadata
 
@@ -148,7 +193,7 @@ function save_solution(path::AbstractString, obj::ModelSolution;
         io["meta/model_type"] = model_type_name(obj.model)
         io["meta/singletons"] = collect(map(string, singletons(obj.ssg)))
         write_tree(io, "meta/model", model_metadata(obj.model))
-        write_grid(io, obj)
+        write_grid(io, obj.ssg)
         write_exogenv(io, obj.exogenv)
         for name in FCTS
             fct = getfield(obj, name)
@@ -177,8 +222,8 @@ _plain_value(v::Number, k) = v
 _plain_value(v::AbstractArray{<:Number}, k) = collect(v)
 _plain_value(v, k) = throw(ArgumentError("cannot store $k::$(typeof(v)) as plain data"))
 
-function write_grid(io, obj)
-    grids = unigrids(obj.ssg)
+function write_grid(io, ssg)
+    grids = unigrids(ssg)
     io["grid/__axes"] = collect(map(string, keys(grids)))
     for (k, g) in pairs(grids)
         io["grid/$k"] = g isa Number ? [g] : collect(g)
