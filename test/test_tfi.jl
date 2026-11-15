@@ -225,3 +225,17 @@ end
     @test vec(p.data) == [0.5, 3.0, 1.0]
 end
 
+
+@testset "TFI: Interpolant files record provenance" begin
+    mktempdir() do dir
+        cfg = make_cfg(dir)
+        OutputVault.write_object(cfg, dir, "fct", obj.Vfct; provenance = Dict("git_commit_id" => "abc123", "branch" => "main"))
+        path = joinpath(dir, "fct.jld2")
+        @test isfile(path)
+        jldopen(path, "r") do io
+            @test io["meta/provenance/git_commit_id"] == "abc123"
+            @test io["meta/provenance/branch"] == "main"
+        end
+        @test OutputVault.read_object(cfg, dir, "fct") == obj.Vfct
+    end
+end

@@ -85,3 +85,18 @@ struct _NoContract <: OutputVault.AbstractTableFormat end
     @test OutputVault.solution_format(mc) == (:portable, :native)
     @test_throws ErrorException OutputVault.write_table_file(_NoContract(), "p", nothing, Dict{String,String}())
 end
+
+# a built-in-style format whose methods live in a package that is not loaded
+struct NeedsPackageFormat <: OutputVault.AbstractTableFormat end
+OutputVault.required_package(::NeedsPackageFormat) = :SomeFormatPackage
+struct NoContractFormat <: OutputVault.AbstractTableFormat end
+
+@testset "AbstractTableFormat — missing methods" begin
+    msg(f) = sprint(showerror, try f(); nothing catch e; e end)
+    @test occursin("NeedsPackageFormat needs its package: using SomeFormatPackage",
+                   msg(() -> OutputVault.write_table_file(NeedsPackageFormat(), "p", (a = [1],), Dict{String,String}())))
+    @test occursin("needs its package: using SomeFormatPackage",
+                   msg(() -> OutputVault.read_table_file(NeedsPackageFormat(), "p")))
+    @test occursin("does not implement the table-format contract",
+                   msg(() -> OutputVault.write_table_file(NoContractFormat(), "p", (a = [1],), Dict{String,String}())))
+end
