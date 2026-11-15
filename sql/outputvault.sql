@@ -14,7 +14,7 @@
 -- Macros (each also takes the economy split and the glob filters, see below):
 --   long form throughout; stat is the statistic's name and value a DOUBLE
 --   vault_stats(root)       moments by sample: branch, experdef, economy, sample, variable, stat, value
---   vault_errstats(root)    error statistics:  branch, experdef, economy, variable, stat, value
+--   vault_errstats(root)    error statistics:  branch, experdef, economy, equation, stat, value
 --   vault_params(root)      model parameters:  branch, experdef, economy, parameter, value
 --   vault_irf(root)         impulse responses: branch, experdef, economy, shock, stat, period, variable, value
 --   vault_simulation(root)  simulation panels: branch, experdef, economy, then the panel's columns
@@ -46,7 +46,9 @@ CREATE OR REPLACE MACRO vault_path_keys(root, path) AS
                    '^(.+)/res-([^-/]+)-([^/]+)/[^/]+/([^/]+)\.parquet$',
                    ['branch', 'experdef', 'economy', 'file']);
 
--- a moment table (`variable` plus one column per statistic) in long form, with its file keys
+-- a moment table (a column of row names plus one column per statistic) in long form, with its file
+-- keys. TFI's MomentArray names its column of row names itself: `variable` in statistics, `equation`
+-- in error statistics, `parameter` in parameters (one macro each, since the column is named in SQL).
 CREATE OR REPLACE MACRO vault_moments_long(root, pattern) AS TABLE
     WITH long AS (
         UNPIVOT (SELECT * FROM read_parquet(pattern, filename = true, union_by_name = true))
@@ -54,6 +56,24 @@ CREATE OR REPLACE MACRO vault_moments_long(root, pattern) AS TABLE
         INTO NAME stat VALUE value
     )
     SELECT vault_path_keys(root, filename) AS k, variable, stat, CAST(value AS DOUBLE) AS value
+    FROM long;
+
+CREATE OR REPLACE MACRO vault_equations_long(root, pattern) AS TABLE
+    WITH long AS (
+        UNPIVOT (SELECT * FROM read_parquet(pattern, filename = true, union_by_name = true))
+        ON COLUMNS(* EXCLUDE (equation, filename))
+        INTO NAME stat VALUE value
+    )
+    SELECT vault_path_keys(root, filename) AS k, equation, stat, CAST(value AS DOUBLE) AS value
+    FROM long;
+
+CREATE OR REPLACE MACRO vault_parameters_long(root, pattern) AS TABLE
+    WITH long AS (
+        UNPIVOT (SELECT * FROM read_parquet(pattern, filename = true, union_by_name = true))
+        ON COLUMNS(* EXCLUDE (parameter, filename))
+        INTO NAME stat VALUE value
+    )
+    SELECT vault_path_keys(root, filename) AS k, parameter, stat, CAST(value AS DOUBLE) AS value
     FROM long;
 
 -- a simulation panel with its file keys
@@ -99,22 +119,22 @@ CREATE OR REPLACE MACRO vault_stats
 
 CREATE OR REPLACE MACRO vault_errstats
     (root, branch_glob := '**', experdef_glob := '*', economies := ['*']) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, variable, stat, value
-        FROM vault_moments_long(root, vault_globs(root, branch_glob, experdef_glob, economies, 'errstats/errstats.parquet'))
+        SELECT k.branch, k.experdef, k.economy, equation, stat, value
+        FROM vault_equations_long(root, vault_globs(root, branch_glob, experdef_glob, economies, 'errstats/errstats.parquet'))
     ),
     (root, branch_glob, experdef_glob, economy_regex, economy_names) AS TABLE (
         SELECT k.branch, k.experdef, k.economy, UNNEST(regexp_extract(k.economy, economy_regex, economy_names)), variable, stat, value
-        FROM vault_moments_long(root, vault_globs(root, branch_glob, experdef_glob, ['*'], 'errstats/errstats.parquet'))
+        FROM vault_equations_long(root, vault_globs(root, branch_glob, experdef_glob, ['*'], 'errstats/errstats.parquet'))
     );
 
 CREATE OR REPLACE MACRO vault_params
     (root, branch_glob := '**', experdef_glob := '*', economies := ['*']) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, variable AS parameter, value
-        FROM vault_moments_long(root, vault_globs(root, branch_glob, experdef_glob, economies, 'params/params.parquet'))
+        SELECT k.branch, k.experdef, k.economy, parameter, value
+        FROM vault_parameters_long(root, vault_globs(root, branch_glob, experdef_glob, economies, 'params/params.parquet'))
     ),
     (root, branch_glob, experdef_glob, economy_regex, economy_names) AS TABLE (
         SELECT k.branch, k.experdef, k.economy, UNNEST(regexp_extract(k.economy, economy_regex, economy_names)), variable AS parameter, value
-        FROM vault_moments_long(root, vault_globs(root, branch_glob, experdef_glob, ['*'], 'params/params.parquet'))
+        FROM vault_parameters_long(root, vault_globs(root, branch_glob, experdef_glob, ['*'], 'params/params.parquet'))
     );
 
 CREATE OR REPLACE MACRO vault_irf

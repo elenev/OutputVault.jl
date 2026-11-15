@@ -34,7 +34,7 @@ ext/
                           all loaded with TFI): writers/readers for TFI types,
                           solution and steady-state file layouts, model_metadata
                           for TFI models, compare_economies over RunHandles,
-                          collect_parameters (default params), `variable` row key
+                          collect_parameters (default params; a MomentArray names its own row column: variable, equation, parameter)
   OutputVaultDuckDBExt.jl -- extension (DuckDB, Tables, TFI): assemble_moments, and
                           compare_economies over an output root
 ```

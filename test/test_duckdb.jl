@@ -51,7 +51,7 @@ using DuckDB
         @test Set(q("SELECT DISTINCT economy FROM vault_stats('$root', 'feat/*', '*', '^([^_]+)', ['model'])").economy) == Set(["frm_init-a"])
 
         es = q("SELECT * FROM vault_errstats('$root') WHERE economy = 'frm_init-a'")
-        @test keys(es) == (:branch, :experdef, :economy, :variable, :stat, :value)
+        @test keys(es) == (:branch, :experdef, :economy, :equation, :stat, :value)
         @test length(es.value) == length(errstats.data)
 
         sim = q("SELECT branch, economy, count(*) AS n FROM vault_simulation('$root') GROUP BY ALL")

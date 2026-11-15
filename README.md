@@ -126,7 +126,7 @@ the file is the same on every machine:
 | macro                    | columns                                                       |
 |:-------------------------|:--------------------------------------------------------------|
 | `vault_stats(root)`      | `branch, experdef, economy, sample, variable, stat, value`    |
-| `vault_errstats(root)`   | `branch, experdef, economy, variable, stat, value`            |
+| `vault_errstats(root)`   | `branch, experdef, economy, equation, stat, value`            |
 | `vault_params(root)`     | `branch, experdef, economy, parameter, value`                 |
 | `vault_irf(root)`        | `branch, experdef, economy, shock, stat, period, variable, value` |
 | `vault_simulation(root)` | `branch, experdef, economy`, then the panel's columns         |

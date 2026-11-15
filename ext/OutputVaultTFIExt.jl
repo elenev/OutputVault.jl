@@ -62,15 +62,13 @@ write_object(cfg::AbstractConfig, dir, name, stv::SteadyState; provenance = Dict
 write_object(cfg::AbstractConfig, dir, name, x::Union{SimulationPanel, SimulationErrorPanel};
              provenance = Dict{String,String}()) =
     write_table(cfg, joinpath(dir, name), x)
-# moments are written with the row names in a column called `variable` (TFI's default is `__row`);
-# the file's metadata records the name, so reading needs no argument
-const ROW_KEY = :variable
-storage_kind(k::TFI.KeyedMomentArray) = storage_kind(k.moments)
+# a MomentArray names its column of row names itself (its row key: `variable` for statistics,
+# `equation` for error statistics, `parameter` for parameters), and the file's metadata records it
 write_object(cfg::AbstractConfig, dir, name, x::MomentArray; provenance = Dict{String,String}()) =
-    write_table(cfg, joinpath(dir, name), TFI.with_rowkey(x, ROW_KEY))
+    write_table(cfg, joinpath(dir, name), x)
 # moments by sample (describe(...).moments): one table per sample, `<sample>.<ext>`
 write_object(cfg::AbstractConfig, dir, name, s::TFI.SamplesTuple; provenance = Dict{String,String}()) =
-    write_table_parts(cfg, dir, name, map(m -> TFI.with_rowkey(m, ROW_KEY), s))
+    write_table_parts(cfg, dir, name, s)
 # an IRF is two tables: statistics (`name`) and raw paths (`name_paths`, empty if none were saved)
 function write_object(cfg::AbstractConfig, dir, name, irf::IRFResult; provenance = Dict{String,String}())
     write_table(cfg, joinpath(dir, name), irf)
@@ -125,7 +123,7 @@ end
 function OutputVault.collect_parameters(mdl::AbstractModel)
     names = Tuple(f for f in fieldnames(typeof(mdl)) if getfield(mdl, f) isa Real)
     values = Float64[getfield(mdl, f) for f in names]
-    return MomentArray(reshape(values, :, 1), names, (:value,))
+    return MomentArray(reshape(values, :, 1), names, (:value,); rowkey = :parameter)
 end
 OutputVault.collect_parameters(obj::ModelSolution) = OutputVault.collect_parameters(obj.model)
 

@@ -123,7 +123,9 @@ end
             @test load(cfg, rf, :errstats).errstats == errstats
             # moments are written with their row names in a column `variable`, and read back from it
             st_ds = Parquet2.Dataset(joinpath(epath, "stats", "stats.parquet"))
-            @test first(Tables.columnnames(st_ds)) == :variable && DataAPI.metadata(st_ds, "tfi.rowkey") == "variable"
+            @test first(Tables.columnnames(st_ds)) == row_key(stats) && DataAPI.metadata(st_ds, "tfi.rowkey") == string(row_key(stats))
+            @test first(Tables.columnnames(Parquet2.Dataset(joinpath(epath, "errstats", "errstats.parquet")))) == :equation
+            @test first(Tables.columnnames(Parquet2.Dataset(joinpath(epath, "params", "params.parquet")))) == :parameter
             # the default params: every scalar real field of the model, one column `value`
             pars = load(cfg, rf, :params).params
             expected = [f for f in fieldnames(typeof(ngm)) if getfield(ngm, f) isa Real]
@@ -184,8 +186,8 @@ end
 allocs_after_warmup(f, args...) = (f(args...); @allocated f(args...))
 const ALLOC_ROWS = ntuple(i -> Symbol("r$i"), 12)
 const ALLOC_COLS = ntuple(j -> Symbol("c$j"), 6)
-restore_static(table) = MomentArray{ALLOC_ROWS, ALLOC_COLS, Float64, SMatrix{12, 6, Float64}}(table)
-restore_dense(table) = MomentArray{ALLOC_ROWS, ALLOC_COLS, Float64}(table)
+restore_static(table) = MomentArray{ALLOC_ROWS, ALLOC_COLS, Float64, SMatrix{12, 6, Float64}, :__row}(table)
+restore_dense(table) = MomentArray{ALLOC_ROWS, ALLOC_COLS, Float64, Matrix{Float64}, :__row}(table)
 
 @testset "TFI: restoring a MomentArray from parquet allocates little beyond Parquet2's reads" begin
     R, C = length(ALLOC_ROWS), length(ALLOC_COLS)
