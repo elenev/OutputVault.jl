@@ -37,6 +37,14 @@ OutputVault.read_kind(::Val{Symbol("OutputVaultTests.QSummary")}, source, path, 
             save_result(cfg, rf, (; obj = (α = 0.33, β = 0.95)); dirty_repo_check = :ignore)
             @test readdir(folder) == ["solution"]
 
+            # without solution objects the repository is not checked, even in a dirty one; with them it is
+            write(joinpath(git_dir, "dirty.txt"), "x")
+            @test_logs save_result(cfg, rf, (; irf = QSummary(["K"], [0.0], [0.0])))
+            @test_logs save_result(cfg, rf, (; irf = QSummary(["K"], [0.0], [0.0])); dirty_repo_check = :error)
+            @test !isfile(joinpath(folder, "irf", "git_commit.txt"))
+            @test_logs (:warn, r"not clean") match_mode = :any save_result(cfg, rf, (; obj = (α = 0.33, β = 0.95)))
+            @test isfile(joinpath(folder, "solution", "git_commit.txt"))
+
             save_result(cfg, rf, (; stats = QSummary(["K", "C"], [3.4, 1.19], [0.4, 0.1])); dirty_repo_check = :ignore)
         end
 

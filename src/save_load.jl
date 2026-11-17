@@ -87,16 +87,17 @@ the latter includes untracked files). Solution objects get the commit id as prov
 
 # Keyword arguments
 - `dirty_repo_check`: `:warn` (default), `:error`, or `:ignore`. Controls behavior when
-  the repository has uncommitted changes.
+  the repository has uncommitted changes. It applies only to saves that include solution objects:
+  other saves record no git state and do not check the repository.
 """
 function save_result(cfg::AbstractConfig, rf::RunHandle, result; dirty_repo_check::Symbol = :warn)
     saved = map(props -> filter(p -> !isnothing(_property(result, p)), props), LAYOUT)
-    commit_id, diffs = get_commit_id(dirty_repo_check)
     if isempty(saved[SOLUTION_COMPONENT])
         epath = economy_folder(cfg, rf; create=true)
-        _write_components(cfg, epath, saved, result, commit_id, diffs)
+        _write_components(cfg, epath, saved, result, nothing, nothing)   # no git state without a solution
         return epath
     end
+    commit_id, diffs = get_commit_id(dirty_repo_check)
     final = _economy_path(cfg, rf)
     stage = joinpath(staging_root(cfg), rf.branch, basename(final) * "-" * string(round(Int, time())))
     _write_components(cfg, mkpath(stage), saved, result, commit_id, diffs)
