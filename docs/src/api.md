@@ -34,7 +34,6 @@ get_results_folders
 ```@docs
 model_metadata
 model_from_metadata
-collect_parameters
 ```
 
 ## Table formats
@@ -67,4 +66,6 @@ OutputVault.read_kind
 duckdb_sql_path
 duckdb_statements
 assemble_moments
+split_by_economy
+OutputVault.momentrows
 ```

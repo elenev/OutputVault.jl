@@ -45,7 +45,7 @@ is already in the right shape:
 
 ```julia
 result = solve_and_simulate(mdl)
-save_result(rf, merge(result, (; params = collect_parameters(result.obj))))
+save_result(rf, merge(result, (; params = collect_parameters(result.obj))))   # TFI's collect_parameters
 ```
 
 From any language with DuckDB, for example Python:

@@ -86,7 +86,7 @@ each file's metadata so that `load` returns them in order.
 save_result(rf, (; params = collect_parameters(obj)))
 ```
 
-[`collect_parameters`](@ref) turns the model's scalar parameters (every real or Boolean field,
+TFI's `collect_parameters` turns the model's scalar parameters (every real or Boolean field,
 a Boolean as 0 or 1) into a one-column `MomentArray` with row key `parameter`, which is what the
 `params` component holds and what a DuckDB query returns as `vault_params`. A model package can
 define its own method to choose differently.

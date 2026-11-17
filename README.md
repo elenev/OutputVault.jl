@@ -67,7 +67,7 @@ right shape:
 ```julia
 using TransitionFunctionIteration
 result = solve_and_simulate(mdl)
-save_result(rf, merge(result, (; params = collect_parameters(result.obj))))
+save_result(rf, merge(result, (; params = collect_parameters(result.obj))))   # TFI's collect_parameters
 ```
 
 Then, from any language with DuckDB (the macros are `sql/outputvault.sql`):
