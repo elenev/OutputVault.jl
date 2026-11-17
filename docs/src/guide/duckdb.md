@@ -106,6 +106,22 @@ compare_economies(moments, (:base, :alt), root; branch = "main", experdef = "v1"
 ```
 
 Calculated moments, including `@CalculatedMoment` expressions, read from these as from any source.
+`assemble_moments` queries the rows of every input of a calculated moment, so nothing extra is
+specified for them:
+
+```julia
+mean(v) = SimulationMoment(v)
+sd(v)   = SimulationMoment(v; stat = :std)
+
+moments = (sd_K   = sd(:K),
+           cv_K   = @CalculatedMoment(sd(:K) / mean(:K)),            # needs the `simulation` rows of K
+           irf_per_beta = CalculatedMoment(nt -> nt.irf_C / nt.beta,
+                                           (irf_C = ImpulseMoment(:C, :up, 2; transformation = DiffLevel()),
+                                            beta  = ParameterMoment(:β))))
+
+table = assemble_moments(root, moments; economies = [:base, :alt])    # simulation, impulse and parameter rows
+compare_economies(moments, split_by_economy(table))
+```
 
 Parameters are rows too, `kind = "parameter"`: `assemble_moments(...; parameters = true)` adds all
 saved parameters (the `params` component) of the economies, `false` none and a collection of names

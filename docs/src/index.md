@@ -44,6 +44,7 @@ queries the saved runs with DuckDB. With TransitionFunctionIteration, the result
 is already in the right shape:
 
 ```julia
+using TransitionFunctionIteration
 result = solve_and_simulate(mdl)
 save_result(rf, merge(result, (; params = collect_parameters(result.obj))))   # TFI's collect_parameters
 ```

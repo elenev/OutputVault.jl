@@ -83,6 +83,7 @@ each file's metadata so that `load` returns them in order.
 ## Parameters and recursions
 
 ```julia
+using TransitionFunctionIteration
 save_result(rf, (; params = collect_parameters(obj)))
 ```
 
@@ -102,6 +103,25 @@ using TransitionFunctionIteration
 compare_economies(moments, (base = RunHandle("base"), alt = RunHandle("alt")))
 ```
 
-compares moments (see TFI's guide on moments) across runs read with the active configuration: each
-run's `stats`, and its IRFs if a moment is an `ImpulseMoment`. For queries over many runs, `assemble_moments` reads only the statistics that the moments need, in one
+compares moments (see TFI's guide on moments) across runs read with the active configuration. Each run's
+`stats` are loaded, its IRFs if a moment is an `ImpulseMoment`, and its `params` if a moment is a
+`ParameterMoment`; a moment that needs a component the run does not have is an error. Calculated moments
+are read from the components their inputs need, so
+`@CalculatedMoment cor_r(:C) * sd(:C) / sd(:r)` needs only `stats`, and a ratio of a `ParameterMoment`
+to a `SimulationMoment` needs `params` as well:
+
+```julia
+using TransitionFunctionIteration
+runs = (base = RunHandle("base"), alt = RunHandle("alt"))
+save_result(runs.base, (; params = collect_parameters(obj_base)))    # saved with the model, see above
+
+moments = (std_K = SimulationMoment(:K; stat = :std),
+           beta  = ParameterMoment(:β),
+           std_K_per_beta = CalculatedMoment(nt -> nt.std_K / nt.beta,
+                                             (std_K = SimulationMoment(:K; stat = :std),
+                                              beta = ParameterMoment(:β))))
+compare_economies(moments, runs)
+```
+
+For queries over many runs, `assemble_moments` reads only the statistics that the moments need, in one
 DuckDB query ([Querying with DuckDB](@ref)).

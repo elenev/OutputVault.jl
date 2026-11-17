@@ -181,7 +181,7 @@ runs = find_matching_results("*/res-demo-*")               # (base = RunHandle, 
 compare_economies((; std_K = moments.std_K, mean_C = moments.mean_C), runs)   # each run's stats
 
 table = assemble_moments(root, moments; experdef = "demo")  # one DuckDB query per kind of moment
-compare_economies(moments, (:base,), table)
+compare_economies(moments, split_by_economy(table))
 ```
 
 `assemble_moments` reads only the statistics the moments name, and only from runs that have them. The
