@@ -47,7 +47,7 @@ so one call can be as large or as small as you like:
 
 ```julia
 save_result(rf, (; obj, stv, stats))               # without the simulation
-save_result(rf, (; irf))                           # IRFs computed later: added to the folder
+save_result(rf, (; irf))                           # IRFs computed later: added to the folder (errors if no solution was saved)
 save_result(rf, (; claims))                        # a recursion computed later
 ```
 
@@ -107,6 +107,6 @@ combination of names that is unique (`economy`, then `experdef_economy`, then
 ## Where things are
 
 ```julia
-output_path()                       # <output_root>/<current branch>, created if absent
+output_path()                       # <output_root>/<current branch> (create=true creates it)
 OutputVault.economy_folder(rf)      # <output_root>/<branch>/res-<experdef>-<economy>
 ```

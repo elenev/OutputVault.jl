@@ -172,9 +172,9 @@ end
             @test with_config(() -> compare_economies(moms, (a = rf_s, b = rf_s)), cfg) ==
                   compare_economies(moms, (a = samples, b = samples))
 
-            # a run with only parameters serves parameter moments (and calculations on them): no stats are loaded
+            # a run with a solution and parameters but no stats serves parameter moments (and calculations on them)
             rf_p = RunHandle("ngm_params"; branch = "testbranch", experdef = "base")
-            save_result(cfg, rf_p, (; params = collect_parameters(obj)); dirty_repo_check = :ignore)
+            save_result(cfg, rf_p, (; obj, params = collect_parameters(obj)); dirty_repo_check = :ignore)
             pname = first(row_names(collect_parameters(obj)))
             pmoms = (p = ParameterMoment(pname),
                      twice = CalculatedMoment(nt -> 2 * nt.p, (p = ParameterMoment(pname),)))
@@ -188,7 +188,7 @@ end
         # tables need a table format
         cfg0 = Config(; output_root = root)
         cd(git_dir) do
-            @test_throws ArgumentError save_result(cfg0, RunHandle("nofmt"; branch = "testbranch"), (; stats);
+            @test_throws ArgumentError save_result(cfg0, RunHandle("nofmt"; branch = "testbranch"), (; obj, stats);
                                                    dirty_repo_check = :ignore)
         end
     end

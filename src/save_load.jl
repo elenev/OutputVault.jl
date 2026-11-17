@@ -77,7 +77,8 @@ one moved into place and the old one deleted. If a step fails (on Windows, files
 as ones a load memory-mapped, block renames and deletes), nothing is lost or half-deleted: a
 warning gives the paths, the old results stay at the economy folder, and the return value is the
 staging folder holding the new results. Saves without solution objects (e.g. IRFs computed
-later) add to the economy folder.
+later) add to the economy folder and error if it does not exist: results are saved only for a
+run whose solution was saved. Only solution saves create folders.
 
 The solution is saved in the formats `solution_format(cfg)`: `:portable` writes one file per
 object (as every other component), `:native` writes all its objects to `res.jld2` with JLD2,
@@ -93,11 +94,12 @@ the latter includes untracked files). Solution objects get the commit id as prov
 function save_result(cfg::AbstractConfig, rf::RunHandle, result; dirty_repo_check::Symbol = :warn)
     saved = map(props -> filter(p -> !isnothing(_property(result, p)), props), LAYOUT)
     if isempty(saved[SOLUTION_COMPONENT])
-        epath = economy_folder(cfg, rf; create=true)
+        epath = economy_folder(cfg, rf)   # results without a solution need the solution's folder
         _write_components(cfg, epath, saved, result, nothing, nothing)   # no git state without a solution
         return epath
     end
     commit_id, diffs = get_commit_id(dirty_repo_check)
+    output_path(cfg, rf.branch; create=true)   # the staged folder moves into it
     final = _economy_path(cfg, rf)
     stage = joinpath(staging_root(cfg), rf.branch, basename(final) * "-" * string(round(Int, time())))
     _write_components(cfg, mkpath(stage), saved, result, commit_id, diffs)
@@ -136,9 +138,6 @@ _property(result, p) = hasproperty(result, p) ? getproperty(result, p) : nothing
 # earlier load) can block a rename or a delete. Whatever fails, results are never lost and never
 # partially deleted: the run's path holds either the new results or the intact old ones, and a
 # warning says where everything is. The return value is the folder holding the new results.
-
-# `output_root/branch/res-{experdef}-{economy}`, not created
-_economy_path(cfg, rf) = joinpath(output_path(cfg, rf.branch), "res-$(rf.experdef)-$(rf.economy)")
 
 function _replace_folder(stage, final)
     had_old = isdir(final)
