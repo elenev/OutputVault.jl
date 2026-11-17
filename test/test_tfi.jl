@@ -171,6 +171,18 @@ end
             moms = (mean_K = SimulationMoment(:K),)
             @test with_config(() -> compare_economies(moms, (a = rf_s, b = rf_s)), cfg) ==
                   compare_economies(moms, (a = samples, b = samples))
+
+            # a run with only parameters serves parameter moments (and calculations on them): no stats are loaded
+            rf_p = RunHandle("ngm_params"; branch = "testbranch", experdef = "base")
+            save_result(cfg, rf_p, (; params = collect_parameters(obj)); dirty_repo_check = :ignore)
+            pname = first(row_names(collect_parameters(obj)))
+            pmoms = (p = ParameterMoment(pname),
+                     twice = CalculatedMoment(nt -> 2 * nt.p, (p = ParameterMoment(pname),)))
+            from_runs = with_config(() -> compare_economies(pmoms, (a = rf_p, b = rf_p)), cfg)
+            @test from_runs == compare_economies(pmoms, (a = EconomyResult(; params = collect_parameters(obj)),
+                                                         b = EconomyResult(; params = collect_parameters(obj))))
+            # a simulation moment still needs stats, which this run lacks
+            @test_throws Exception with_config(() -> compare_economies((; m = SimulationMoment(:K)), (a = rf_p,)), cfg)
         end
 
         # tables need a table format

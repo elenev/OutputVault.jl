@@ -38,7 +38,7 @@ const SCHEMA_VERSION = 2
 const FCTS = (:Pfct, :Vfct, :Tfct, :Ffct)
 const STV_PARTS = (:guess, :endog, :exog, :values)
 
-## compare_economies over saved runs: each run's stats component (and its IRFs or parameters if a moment needs them)
+## compare_economies over saved runs: the components that the moments need: stats, IRFs and parameters
 
 # the moments that are not calculated, including the inputs of calculated ones
 leaf_moments(m::TFI.CalculatedMoment) = reduce(vcat, map(leaf_moments, collect(values(m.inputs))))
@@ -50,10 +50,11 @@ function TFI.compare_economies(
         economies::NamedTuple{K, NTuple{N, OutputVault.RunHandle}} where {K, N};
         kwargs...)
     leaves = reduce(vcat, map(leaf_moments, collect(values(moments))); init = TFI.AbstractMoment[])
+    needs_stats = any(m -> m isa TFI.SimulationMoment, leaves)
     needs_irf = any(m -> m isa TFI.ImpulseMoment, leaves)
     needs_params = any(m -> m isa TFI.ParameterMoment, leaves)
     results = map(economies) do e
-        TFI.EconomyResult(; stats = FileIO.load(e, :stats).stats,
+        TFI.EconomyResult(; stats = needs_stats ? FileIO.load(e, :stats).stats : nothing,
                           irf = needs_irf ? FileIO.load(e, :irf).irf : nothing,
                           params = needs_params ? FileIO.load(e, :params).params : nothing)
     end
