@@ -36,7 +36,7 @@ every project's runs have the same structure and tools can find objects across r
 | `errstats`   | `errstats`            |
 | `simulation` | `simseries`, `errs`   |
 | `irf`        | `irf`                 |
-| `params`     | `params` (the model's scalar parameters, see `collect_parameters`) |
+| `params`     | `params` (the model's scalar parameters, see TFI's `collect_parameters`) |
 | `recursions` | `claims`, `welfare` (interpolants of recursions computed at a solution's policies; each is saved when it is computed, the solution is not touched) |
 """
 const LAYOUT = (solution = (:obj, :stv), stats = (:stats,), errstats = (:errstats,),

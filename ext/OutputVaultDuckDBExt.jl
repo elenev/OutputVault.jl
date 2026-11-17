@@ -2,31 +2,57 @@
 # saved runs with the macros of sql/outputvault.sql.
 #
 # Maintainer notes
-# - One query per kind of moment: the requested entries (TFI.moment_keys of every moment) go in as a
-#   VALUES list that is joined to vault_stats (simulation moments) or vault_irf (impulse moments),
-#   so DuckDB reads only the files of the matching runs and returns only the numbers asked for.
-# - The entries are literals in the SQL text (quotes doubled); the root and the globs are literals
-#   too, because the macros build file patterns from them.
+# - `momentrows(moment)` lists the rows of the long table that a moment needs, and is the only place
+#   where TFI's moment types meet the layout of saved results: `assemble_moments` fetches those rows,
+#   and `momentvalues` for a per-economy Dict (below) reads them. The first row is the value and a
+#   second, for an impulse moment, the basis of its transformation.
+# - One query per kind of row: the requested rows go in as a VALUES list that is joined to vault_stats
+#   (simulation rows) or vault_irf (impulse rows), so DuckDB reads only the files of the matching runs
+#   and returns only the numbers asked for. Parameter rows come from vault_params.
+# - The rows are literals in the SQL text (quotes doubled); the root and the globs are literals too,
+#   because the macros build file patterns from them.
 # - Only the runs that have the component are queried (vault_runs lists the runs from their solution
 #   folders, without opening data files), because a file pattern that matches nothing is an error in
 #   DuckDB; economies without the component are simply absent from the result.
-# - The result columns are those of TFI.MomentTable.
+# - The result of assemble_moments is a plain column table of Strings (for any language to read).
+#   `split_by_economy` turns it into one Dict per economy keyed by the row, with Symbols, which is
+#   what `TFI.getmoment` reads; the reading itself is TFI's, so a calculated moment, the base
+#   economy and `compare_economies` all work unchanged.
 module OutputVaultDuckDBExt
 
 using OutputVault, DuckDB, Tables
 import TransitionFunctionIteration as TFI
 
+## The rows of a moment
+
+const LeafMoment = Union{TFI.SimulationMoment, TFI.ImpulseMoment, TFI.ParameterMoment}
+
+OutputVault.momentrows(m::TFI.SimulationMoment) = (
+    (kind = :simulation, group = m.sample, variable = m.var, stat = m.stat, period = 0),
+)
+OutputVault.momentrows(m::TFI.ImpulseMoment) = (
+    (kind = :impulse, group = m.shock,  variable = m.var, stat = m.stat, period = m.period),
+    (kind = :impulse, group = :uncond, variable = m.var, stat = m.stat, period = m.period),
+)
+OutputVault.momentrows(m::TFI.ParameterMoment) = (
+    (kind = :parameter, group = :parameters, variable = m.name, stat = :value, period = 0),
+)
+OutputVault.momentrows(m::TFI.CalculatedMoment) =
+    unique(reduce(vcat, [collect(OutputVault.momentrows(c)) for c in values(m.inputs)]))
+
+# the distinct rows of all moments, by kind
+function requested_rows(moments)
+    rows = unique(reduce(vcat, [collect(OutputVault.momentrows(m)) for m in values(moments)]; init = NamedTuple[]))
+    return (; (kind => filter(r -> r.kind === kind, rows) for kind in (:simulation, :impulse, :parameter))...)
+end
+
+## Querying
+
 # a SQL string literal
 sqlstring(x) = "'" * replace(string(x), "'" => "''") * "'"
 
-# the distinct entries, as `kind` (:simulation or :impulse) => rows (group, variable, stat, period)
-function requested_entries(moments)
-    keys_ = unique(Iterators.flatten(map(TFI.moment_keys, values(moments))))
-    return (simulation = filter(k -> k.kind === :simulation, keys_), impulse = filter(k -> k.kind === :impulse, keys_))
-end
-
-values_list(entries) = join(("($(sqlstring(k.group)), $(sqlstring(k.variable)), $(sqlstring(k.stat)), $(k.period))"
-                             for k in entries), ", ")
+values_list(rows) = join(("($(sqlstring(r.group)), $(sqlstring(r.variable)), $(sqlstring(r.stat)), $(r.period))"
+                          for r in rows), ", ")
 
 # the economies among `wanted` (all if nothing) that have `component` saved, as a SQL list literal;
 # `file` is the file below the component's folder (nothing: the folder suffices)
@@ -43,12 +69,12 @@ function economies_with(con, root, branch, experdef, wanted, component, file)
 end
 sqllist(xs) = "[" * join(sqlstring.(xs), ", ") * "]"
 
-function query_simulation(con, root, branch, experdef, entries, wanted)
-    isempty(entries) && return nothing
+function query_simulation(con, root, branch, experdef, rows, wanted)
+    isempty(rows) && return nothing
     have = economies_with(con, root, branch, experdef, wanted, "stats", nothing)
     isempty(have) && return nothing
     sql = """
-        WITH wanted(grp, variable, stat, period) AS (VALUES $(values_list(entries)))
+        WITH wanted(grp, variable, stat, period) AS (VALUES $(values_list(rows)))
         SELECT s.branch, s.experdef, s.economy, 'simulation' AS kind, s.sample AS "group", s.variable, s.stat,
                w.period, s.value
         FROM vault_stats($(sqlstring(root)), branch_glob := $(sqlstring(branch)), experdef_glob := $(sqlstring(experdef)),
@@ -57,17 +83,35 @@ function query_simulation(con, root, branch, experdef, entries, wanted)
     return Tables.columntable(DBInterface.execute(con, sql))
 end
 
-function query_impulse(con, root, branch, experdef, entries, wanted)
-    isempty(entries) && return nothing
+function query_impulse(con, root, branch, experdef, rows, wanted)
+    isempty(rows) && return nothing
     have = economies_with(con, root, branch, experdef, wanted, "irf", "irf.parquet")
     isempty(have) && return nothing
     sql = """
-        WITH wanted(grp, variable, stat, period) AS (VALUES $(values_list(entries)))
+        WITH wanted(grp, variable, stat, period) AS (VALUES $(values_list(rows)))
         SELECT i.branch, i.experdef, i.economy, 'impulse' AS kind, i.shock AS "group", i.variable, i.stat,
                i.period, i.value
         FROM vault_irf($(sqlstring(root)), branch_glob := $(sqlstring(branch)), experdef_glob := $(sqlstring(experdef)),
                          economies := $(sqllist(have))) i
         JOIN wanted w ON i.shock = w.grp AND i.variable = w.variable AND i.stat = w.stat AND i.period = w.period"""
+    return Tables.columntable(DBInterface.execute(con, sql))
+end
+
+# the saved parameters: all of them (`parameters == true`), the named ones, or none, plus those that a
+# ParameterMoment among the moments names
+function query_parameters(con, root, branch, experdef, rows, parameters, wanted)
+    required = String[String(r.variable) for r in rows]
+    names = parameters === true ? nothing :
+            parameters === false ? required : unique(vcat(String.(collect(parameters)), required))
+    isnothing(names) || isempty(names) && return nothing
+    have = economies_with(con, root, branch, experdef, wanted, "params", "params.parquet")
+    isempty(have) && return nothing
+    where_ = isnothing(names) ? "" : "WHERE p.parameter IN ($(join(sqlstring.(names), ", ")))"
+    sql = """
+        SELECT p.branch, p.experdef, p.economy, 'parameter' AS kind, 'parameters' AS "group", p.parameter AS variable,
+               'value' AS stat, 0 AS period, p.value
+        FROM vault_params($(sqlstring(root)), branch_glob := $(sqlstring(branch)), experdef_glob := $(sqlstring(experdef)),
+                          economies := $(sqllist(have))) p $where_"""
     return Tables.columntable(DBInterface.execute(con, sql))
 end
 
@@ -82,24 +126,60 @@ end
 
 function OutputVault.assemble_moments(root::AbstractString, moments::NamedTuple;
                                       branch::AbstractString = "**", experdef::AbstractString = "*",
-                                      economies = nothing)
+                                      economies = nothing, parameters = true)
     root = String(root)
-    entries = requested_entries(moments)
+    rows = requested_rows(moments)
     con = DBInterface.connect(DuckDB.DB)
     try
         foreach(s -> DBInterface.execute(con, s), OutputVault.duckdb_statements())
         wanted = isnothing(economies) ? nothing : String.(economies)
-        return vcat_columns((query_simulation(con, root, branch, experdef, entries.simulation, wanted),
-                             query_impulse(con, root, branch, experdef, entries.impulse, wanted)))
+        return vcat_columns((query_simulation(con, root, branch, experdef, rows.simulation, wanted),
+                             query_impulse(con, root, branch, experdef, rows.impulse, wanted),
+                             query_parameters(con, root, branch, experdef, rows.parameter, parameters, wanted)))
     finally
         DBInterface.close!(con)
     end
 end
 
-# compare_economies over a saved output root: assemble the statistics, then read them as a table
-TFI.compare_economies(moments::NamedTuple, economy_names::Union{Tuple, AbstractVector}, root::AbstractString;
-                      branch::AbstractString = "**", experdef::AbstractString = "*", base = 1) =
-    TFI.compare_economies(moments, economy_names,
-                          OutputVault.assemble_moments(root, moments; branch, experdef, economies = economy_names); base)
+## Reading: one Dict per economy
+
+const RowKey = NamedTuple{(:kind, :group, :variable, :stat, :period), Tuple{Symbol, Symbol, Symbol, Symbol, Int}}
+
+function OutputVault.split_by_economy(table; economies = nothing)
+    cols = Tables.columntable(table)
+    names = unique(String.(cols.economy))
+    isnothing(economies) || (names = [e for e in String.(economies) if e in names])
+    dicts = map(names) do e
+        d = Dict{RowKey, Float64}()
+        for j in findall(==(e), cols.economy)
+            key = (kind = Symbol(cols.kind[j]), group = Symbol(cols.group[j]), variable = Symbol(cols.variable[j]),
+                   stat = Symbol(cols.stat[j]), period = Int(cols.period[j]))
+            haskey(d, key) && throw(ArgumentError("moment table has duplicate rows for economy $e: $key"))
+            d[key] = cols.value[j]
+        end
+        d
+    end
+    return NamedTuple{Tuple(Symbol.(names))}(Tuple(dicts))
+end
+
+function TFI.momentvalues(d::AbstractDict, m::LeafMoment)
+    values = map(OutputVault.momentrows(m)) do r
+        haskey(d, r) || throw(KeyError("saved results have no entry $r"))
+        d[r]
+    end
+    return first(values), length(values) == 2 ? values[2] : nothing
+end
+
+## compare_economies over a saved output root: assemble the rows, then read them as economies
+
+function TFI.compare_economies(moments::NamedTuple, economy_names::Union{Tuple, AbstractVector}, root::AbstractString;
+                               branch::AbstractString = "**", experdef::AbstractString = "*", base = 1)
+    moments = map(v -> v isa TFI.AbstractMoment ? v : TFI.SimulationMoment(v), moments)
+    table = OutputVault.assemble_moments(root, moments; branch, experdef, economies = economy_names)
+    economies = OutputVault.split_by_economy(table; economies = economy_names)
+    absent = [e for e in Symbol.(economy_names) if e ∉ keys(economies)]
+    isempty(absent) || throw(KeyError("saved results have no statistics for economies $absent (branch $branch, experdef $experdef)"))
+    return TFI.compare_economies(moments, economies; base)
+end
 
 end # module

@@ -400,13 +400,3 @@ Rebuild a model of type `M` from `model_metadata` output (used by `load_solution
 """
 function model_from_metadata end
 
-"""
-    collect_parameters(obj_or_model) -> MomentArray
-
-The model's parameters as a table to save in the `params` component: one row per parameter, one
-column `value`. The default for TFI models (in the TransitionFunctionIteration extension) takes
-every scalar real or Boolean field of the model (a Boolean is 0 or 1); a project can add a method
-for its model type to choose differently. Save it with `save_result(rf, (; params = collect_parameters(obj)))`.
-"""
-function collect_parameters end
-

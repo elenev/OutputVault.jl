@@ -38,15 +38,24 @@ const SCHEMA_VERSION = 2
 const FCTS = (:Pfct, :Vfct, :Tfct, :Ffct)
 const STV_PARTS = (:guess, :endog, :exog, :values)
 
-## compare_economies over saved runs: each run's stats component (and its IRFs if a moment needs them)
+## compare_economies over saved runs: each run's stats component (and its IRFs or parameters if a moment needs them)
+
+# the moments that are not calculated, including the inputs of calculated ones
+leaf_moments(m::TFI.CalculatedMoment) = reduce(vcat, map(leaf_moments, collect(values(m.inputs))))
+leaf_moments(m::TFI.AbstractMoment) = [m]
+leaf_moments(x) = [TFI.SimulationMoment(x)]    # a bare variable name
 
 function TFI.compare_economies(
         moments::NamedTuple,
         economies::NamedTuple{K, NTuple{N, OutputVault.RunHandle}} where {K, N};
         kwargs...)
-    needs_irf = any(m -> m isa TFI.ImpulseMoment, values(moments))
+    leaves = reduce(vcat, map(leaf_moments, collect(values(moments))); init = TFI.AbstractMoment[])
+    needs_irf = any(m -> m isa TFI.ImpulseMoment, leaves)
+    needs_params = any(m -> m isa TFI.ParameterMoment, leaves)
     results = map(economies) do e
-        TFI.EconomyResults(FileIO.load(e, :stats).stats, needs_irf ? FileIO.load(e, :irf).irf : nothing)
+        TFI.EconomyResult(; stats = FileIO.load(e, :stats).stats,
+                          irf = needs_irf ? FileIO.load(e, :irf).irf : nothing,
+                          params = needs_params ? FileIO.load(e, :params).params : nothing)
     end
     return compare_economies(moments, results; kwargs...)
 end
@@ -119,16 +128,6 @@ function read_kind(::kind(:IRFResult), source, path, fmt)
     paths = splitext(path)[1] * "_paths." * table_extension(fmt)
     isfile(paths) ? IRFResult(source, read_table_file(fmt, paths)) : IRFResult(source)
 end
-
-## Model parameters: the default `params` object
-
-# every scalar real or Boolean field of the model, one row each, in one column `value`
-function OutputVault.collect_parameters(mdl::AbstractModel)
-    names = Tuple(f for f in fieldnames(typeof(mdl)) if getfield(mdl, f) isa Real)
-    values = Float64[getfield(mdl, f) for f in names]
-    return MomentArray(reshape(values, :, 1), names, (:value,); rowkey = :parameter)
-end
-OutputVault.collect_parameters(obj::ModelSolution) = OutputVault.collect_parameters(obj.model)
 
 ## Model metadata
 

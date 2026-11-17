@@ -89,18 +89,73 @@ using DuckDB
         @test Set(Tables.columntable(DBInterface.execute(con, "SELECT DISTINCT economy FROM vault_stats('$root', economies := ['ngm', 'noirf'])")).economy) ==
               Set(["ngm", "noirf"])
         @test length(assemble_moments(root, moments; economies = [:ngm]).value) == 4
-        memory = EconomyResults(samples, irf)
-        economies = (:ngm, :ngm2)
-        via_root = compare_economies(moments, economies, root; experdef = "alt")
+        memory = EconomyResult(; stats = samples, irf)
+        economies = split_by_economy(table; economies = [:ngm, :ngm2])
+        @test keys(economies) == (:ngm, :ngm2) && all(e -> e isa Dict, values(economies))
+        @test keys(split_by_economy(table; economies = [:ngm2, :nope, :ngm])) == (:ngm2, :ngm)   # in that order, absent left out
+        @test getmoment(economies.ngm, moments.irf_K) == getmoment(memory, moments.irf_K)
+        @test_throws ArgumentError split_by_economy(merge(table, (; economy = fill("ngm", length(table.value)))))   # duplicate rows
+        via_root = compare_economies(moments, (:ngm, :ngm2), root; experdef = "alt")
         @test via_root.data == compare_economies(moments, (ngm = memory, ngm2 = memory)).data
-        @test via_root.data == compare_economies(moments, economies, table).data
+        @test via_root.data == compare_economies(moments, economies).data
         @test_throws KeyError compare_economies((x = SimulationMoment(:K; stat = :p99),), (:ngm,), root)
+        @test_throws KeyError getmoment(economies.ngm, SimulationMoment(:K; stat = :p99))
+        # a calculated moment, with named moments, reads from the table as from memory
+        calc = @CalculatedMoment moments mean_K / a_std_K + irf_K
+        @test getmoment(economies.ngm, calc) == getmoment(memory, calc)
+        # rows of a moment
+        @test OutputVault.momentrows(moments.irf_K) == ((kind = :impulse, group = :pos, variable = :K, stat = :mean, period = 3),
+                                                        (kind = :impulse, group = :uncond, variable = :K, stat = :mean, period = 3))
+        @test length(OutputVault.momentrows(calc)) == 4       # mean_K, a_std_K, and irf_K's two rows, none repeated
         # the same over RunHandles of the active configuration, reading the IRFs for impulse moments
         runs = (ngm = RunHandle("ngm"; branch = "main", experdef = "alt"), ngm2 = RunHandle("ngm2"; branch = "main", experdef = "alt"))
         via_handles = with_config(cfg) do
             compare_economies(moments, runs)
         end
         @test via_handles.data == compare_economies(moments, (ngm = memory, ngm2 = memory)).data
+    end
+
+    # parameters from saved runs
+    with_tempdir() do root
+        cfg = Config(; output_root = root, table_format = PARQUET)
+        cd(git_dir) do
+            save_result(cfg, RunHandle("pars"; branch = "main", experdef = "alt"),
+                        (; obj, stats = samples, params = collect_parameters(obj)); dirty_repo_check = :ignore)
+            save_result(cfg, RunHandle("nopars"; branch = "main", experdef = "alt"),
+                        (; obj, stats = samples); dirty_repo_check = :ignore)
+        end
+        pars = collect_parameters(obj)
+        name = first(row_names(pars))
+        value = getmoment(pars, name, :value)
+        K_moments = (mean_K = SimulationMoment(:K),)
+        nrow(table) = length(table.value)
+        all_pars = assemble_moments(root, K_moments)
+        @test Set(all_pars.kind) == Set(["simulation", "parameter"]) && Set(all_pars.economy) == Set(["pars", "nopars"])
+        @test count(==("parameter"), all_pars.kind) == length(row_names(pars))                 # the economy without params has none
+        @test all(==("pars"), all_pars.economy[all_pars.kind .== "parameter"])
+        @test nrow(assemble_moments(root, K_moments; parameters = false)) == 2
+        named = assemble_moments(root, K_moments; parameters = [name])
+        @test count(==("parameter"), named.kind) == 1 && only(named.variable[named.kind .== "parameter"]) == String(name)
+        # a ParameterMoment is fetched even with parameters = false
+        pm = ParameterMoment(name)
+        required = assemble_moments(root, (; pm); parameters = false)
+        @test count(==("parameter"), required.kind) == 1
+        economies = split_by_economy(all_pars)
+        @test getmoment(economies.pars, pm) == value
+        @test getmoment(economies.pars, ParameterMoment(name; transformation = TransitionFunctionIteration.Transformations.Pct())) == 100value
+        @test_throws KeyError getmoment(economies.nopars, pm)
+        @test_throws KeyError getmoment(economies.pars, ParameterMoment(:not_a_parameter))
+        # and a calculated moment of a statistic and a parameter
+        named = (pm = pm, mean_K = SimulationMoment(:K))
+        calc = @CalculatedMoment named pm * mean_K
+        memory = EconomyResult(; stats = samples, params = pars)
+        @test getmoment(economies.pars, calc) == getmoment(memory, calc)
+        # over RunHandles, the parameters are loaded when a moment needs them
+        runs = (pars = RunHandle("pars"; branch = "main", experdef = "alt"),)
+        via_handles = with_config(cfg) do
+            compare_economies((calc = calc,), runs)
+        end
+        @test via_handles(:calc, :pars) == getmoment(memory, calc)
     end
 
     # Windows separators in the root and the file path
