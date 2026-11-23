@@ -25,7 +25,7 @@ OutputVaultTFIExt = ["TransitionFunctionIteration", "StaticArrays", "StructArray
 
 [compat]
 DataAPI = "1.13"
-DuckDB = "1, 2"
+DuckDB = "1"
 FileIO = "1"
 Glob = "1"
 JLD2 = "0.6"
