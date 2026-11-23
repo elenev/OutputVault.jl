@@ -10,11 +10,16 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - '1.12'
+          - '1'   # Latest stable release
+          - 'min' # Lowest Julia version allowed by [compat]
         os:
           - ubuntu-latest
           - windows-latest
           - macos-latest
+        exclude:
+          # Oldest supported Julia only on Linux; the slow platforms test the latest release
+          - {version: 'min', os: windows-latest}
+          - {version: 'min', os: macos-latest}
     steps:
       - uses: actions/checkout@v4
       # TransitionFunctionIteration is a private repository: check it out with a read-only deploy key and

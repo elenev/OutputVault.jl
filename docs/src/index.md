@@ -65,7 +65,7 @@ using Pkg
 Pkg.add(url = "git@github.com:elenev/OutputVault.jl.git")
 ```
 
-The package requires Julia 1.9 or later. Add the packages of the extensions you use
+The package requires Julia 1.12 or later. Add the packages of the extensions you use
 (`Parquet2` for tables, `TransitionFunctionIteration` for its types, `DuckDB` for queries).
 
 ## Where to go next

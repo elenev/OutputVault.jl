@@ -1,6 +1,6 @@
 name = "OutputVault"
 uuid = "73131c07-f5bc-4fd3-b98a-1e5f3b14898e"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Vadim Elenev <47358678+elenev@users.noreply.github.com>"]
 
 [deps]
@@ -25,7 +25,7 @@ OutputVaultTFIExt = ["TransitionFunctionIteration", "StaticArrays", "StructArray
 
 [compat]
 DataAPI = "1.13"
-DuckDB = "1"
+DuckDB = "1, 2"
 FileIO = "1"
 Glob = "1"
 JLD2 = "0.6"
@@ -35,4 +35,4 @@ StaticArrays = "1.9"
 StructArrays = "0.7"
 Tables = "1"
 TransitionFunctionIteration = "0.5"
-julia = "1.9"
+julia = "1.12"

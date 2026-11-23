@@ -118,7 +118,7 @@ using Pkg
 Pkg.add(url = "git@github.com:elenev/OutputVault.jl.git")
 ```
 
-Julia 1.9 or later. Add the packages of the extensions you use.
+Julia 1.12 or later. Add the packages of the extensions you use.
 
 ## Status
 
