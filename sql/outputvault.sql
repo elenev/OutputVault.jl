@@ -98,7 +98,7 @@ CREATE OR REPLACE MACRO vault_glob(root, branch_glob, experdef_glob, files) AS
 
 -- the globs of a component's files for a list of economy patterns (read_parquet takes a list)
 CREATE OR REPLACE MACRO vault_globs(root, branch_glob, experdef_glob, economies, files) AS
-    list_transform(economies, e -> root || '/' || branch_glob || '/res-' || experdef_glob || '-' || e || '/' || files);
+    list_transform(economies, lambda e: root || '/' || branch_glob || '/res-' || experdef_glob || '-' || e || '/' || files);
 
 -- the runs under a root, from their solution folders
 CREATE OR REPLACE MACRO vault_run_keys(root, branch_glob, experdef_glob) AS TABLE
