@@ -30,10 +30,12 @@ const LeafMoment = Union{TFI.SimulationMoment, TFI.ImpulseMoment, TFI.ParameterM
 OutputVault.momentrows(m::TFI.SimulationMoment) = (
     (kind = :simulation, group = m.sample, variable = m.var, stat = m.stat, period = 0),
 )
-OutputVault.momentrows(m::TFI.ImpulseMoment) = (
-    (kind = :impulse, group = m.shock,  variable = m.var, stat = m.stat, period = m.period),
-    (kind = :impulse, group = :uncond, variable = m.var, stat = m.stat, period = m.period),
-)
+function OutputVault.momentrows(m::TFI.ImpulseMoment)
+    value = (kind = :impulse, group = m.shock, variable = m.var, stat = m.stat, period = m.period)
+    TFI.Transformations.requires_basis(TFI.transformation(m)) || return (value,)
+    basis = (kind = :impulse, group = m.basis, variable = m.var, stat = m.stat, period = m.period)
+    return (value, basis)
+end
 OutputVault.momentrows(m::TFI.ParameterMoment) = (
     (kind = :parameter, group = :parameters, variable = m.name, stat = :value, period = 0),
 )

@@ -161,6 +161,11 @@ error as above.
 
 ## Calculated moments and parameters
 
+Impulse moments select their reference path with `basis = :uncond` by default, or a custom name
+such as `ImpulseMoment(:C, :up, 2; transformation = DiffLevel(), basis = :control)`.
+Only transformations that require a basis fetch that reference row; a level moment works even
+when no baseline path was saved. This is the same behavior as reading an in-memory IRF.
+
 Calculated moments, including `@CalculatedMoment` expressions, read from these entries as from any
 source. `assemble_moments` selects the rows of every input of a calculated moment, so nothing extra is
 specified for them:

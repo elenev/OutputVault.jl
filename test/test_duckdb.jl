@@ -201,6 +201,58 @@ using DuckDB
         @test via_handles(:calc, :pars) == getmoment(memory, calc)
     end
 
+    @testset "Impulse basis across memory, reload and selected rows" begin
+        T = TransitionFunctionIteration.Transformations
+        source = (__shock = repeat(["up", "control", "uncond"], 2),
+                  __stat = repeat(["mean", "std"], inner = 3),
+                  __period = ones(Int, 6), C = [6.0, 2.0, 3.0, 0.6, 0.2, 0.3])
+        full = IRFResult(source)
+        single = IRFResult(map(v -> v[[1, 4]], source))
+        reordered = IRFResult(map(v -> v[[3, 2, 1, 6, 5, 4]], source))
+        level = ImpulseMoment(:C, :up, 1; basis = :absent, compare_transformation = T.DiffLevel())
+        ratio = ImpulseMoment(:C, :up, 1; basis = :control, transformation = T.RatioPct())
+        diff = ImpulseMoment(:C, :up, 1; basis = :control, transformation = T.DiffLevel())
+        default_ratio = ImpulseMoment(:C, :up, 1; transformation = T.RatioPct())
+        default_diff = ImpulseMoment(:C, :up, 1; transformation = T.DiffLevel())
+        nested = CalculatedMoment(nt -> 2nt.x, (x = CalculatedMoment(nt -> nt.r, (r = ratio,)),))
+        specs = (; level, ratio, diff, default_ratio, default_diff, nested)
+        @test length(OutputVault.momentrows(level)) == 1
+        @test last(OutputVault.momentrows(ratio)).group == :control
+        with_tempdir() do root
+            cfg = Config(; output_root = root, table_format = PARQUET)
+            runs = (a = RunHandle("a"; branch = "main"), b = RunHandle("b"; branch = "main"))
+            lone = RunHandle("single"; branch = "main")
+            cd(git_dir) do
+                save_result(cfg, runs.a, (; obj = (marker = 1,), irf = full); dirty_repo_check = :ignore)
+                save_result(cfg, runs.b, (; obj = (marker = 1,), irf = reordered); dirty_repo_check = :ignore)
+                save_result(cfg, lone, (; obj = (marker = 1,), irf = single); dirty_repo_check = :ignore)
+            end
+            rows = assemble_moments(root, specs; branch = "main", economies = [:a, :b], parameters = false)
+            saved = split_by_economy(rows; key = :economy, order = [:a, :b])
+            for run in values(runs), m in values(specs)
+                restored = load(cfg, run, :irf).irf
+                @test getmoment(restored, m) == getmoment(full, m)
+                @test getmoment(saved[Symbol(run.economy)], m) == getmoment(full, m)
+            end
+            expected = compare_economies(specs, (a = full, b = reordered))
+            @test compare_economies(specs, saved).data == expected.data
+            @test with_config(() -> compare_economies(specs, runs), cfg).data == expected.data
+            @test compare_economies(specs, (:a, :b), root; branch = "main").data == expected.data
+            only_level = assemble_moments(root, (; level); economies = [:single], parameters = false)
+            @test length(only_level.value) == 1
+            @test getmoment(split_by_economy(only_level; key = :economy).single, level) == 6.0
+            @test getmoment(load(cfg, lone, :irf).irf, level) == 6.0
+            missing = assemble_moments(root, (; ratio, default_ratio); economies = [:single], parameters = false)
+            missing_source = split_by_economy(missing; key = :economy).single
+            @test_throws KeyError getmoment(missing_source, ratio)
+            @test_throws KeyError getmoment(missing_source, default_ratio)
+            self = ImpulseMoment(:C, :up, 1; basis = :up, transformation = T.DiffLevel())
+            self_rows = assemble_moments(root, (; self); economies = [:single], parameters = false)
+            @test length(self_rows.value) == 1
+            @test getmoment(split_by_economy(self_rows; key = :economy).single, self) == 0.0
+        end
+    end
+
     # Windows separators in the root and the file path
     k = q(raw"""SELECT vault_path_keys('C:\out\', 'C:\out\feat\x\res-base-frm-1\stats\uncond.parquet') AS k""").k
     @test only(k) == (branch = "feat/x", experdef = "base", economy = "frm-1", file = "uncond")

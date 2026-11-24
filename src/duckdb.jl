@@ -69,7 +69,8 @@ function split_by_economy end
 
 The rows of the long table of [`assemble_moments`](@ref) that a TFI moment needs, as NamedTuples
 `(kind, group, variable, stat, period)` of Symbols and an Int: the first is the moment's value and a second,
-for an impulse moment, the baseline that its transformation uses as the basis. A calculated moment
+for an impulse moment whose transformation requires it, the path named by its `basis` (`:uncond`
+by default). Level moments need only the first row. A calculated moment
 needs the rows of its inputs.
 """
 function momentrows end
