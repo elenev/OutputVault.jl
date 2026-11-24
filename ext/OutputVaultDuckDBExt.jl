@@ -145,21 +145,28 @@ end
 
 const RowKey = NamedTuple{(:kind, :group, :variable, :stat, :period), Tuple{Symbol, Symbol, Symbol, Symbol, Int}}
 
-function OutputVault.split_by_economy(table; economies = nothing)
+function OutputVault.split_by_economy(table; key = OutputVault.RUN_FIELDS, order = nothing)
     cols = Tables.columntable(table)
-    names = unique(String.(cols.economy))
-    isnothing(economies) || (names = [e for e in String.(economies) if e in names])
-    dicts = map(names) do e
-        d = Dict{RowKey, Float64}()
-        for j in findall(==(e), cols.economy)
-            key = (kind = Symbol(cols.kind[j]), group = Symbol(cols.group[j]), variable = Symbol(cols.variable[j]),
-                   stat = Symbol(cols.stat[j]), period = Int(cols.period[j]))
-            haskey(d, key) && throw(ArgumentError("moment table has duplicate rows for economy $e: $key"))
-            d[key] = cols.value[j]
-        end
-        d
+    runs = unique([(branch = String(b), experdef = String(x), economy = String(e))
+                   for (b, x, e) in zip(cols.branch, cols.experdef, cols.economy)])
+    names = OutputVault.run_keys(runs, key)
+    fields = OutputVault._key_fields(key)
+    dicts = Dict(n => Dict{RowKey, Float64}() for n in names)
+    for j in eachindex(cols.value)
+        run = (branch = cols.branch[j], experdef = cols.experdef[j], economy = cols.economy[j])
+        d = dicts[OutputVault._run_key(run, fields)]
+        row = (kind = Symbol(cols.kind[j]), group = Symbol(cols.group[j]), variable = Symbol(cols.variable[j]),
+               stat = Symbol(cols.stat[j]), period = Int(cols.period[j]))
+        haskey(d, row) && throw(ArgumentError("moment table has duplicate rows for $(run.branch)/res-$(run.experdef)-$(run.economy): $row"))
+        d[row] = cols.value[j]
     end
-    return NamedTuple{Tuple(Symbol.(names))}(Tuple(dicts))
+    if !isnothing(order)
+        wanted = OutputVault._key_name.(collect(order))
+        missing_ = setdiff(wanted, names)
+        isempty(missing_) || throw(ArgumentError("order names $missing_, which are not in the table; its names (key = $(repr(key))) are $names"))
+        names = wanted
+    end
+    return NamedTuple{Tuple(names)}(Tuple(dicts[n] for n in names))
 end
 
 function TFI.momentvalues(d::AbstractDict, m::LeafMoment)
@@ -176,9 +183,9 @@ function TFI.compare_economies(moments::NamedTuple, economy_names::Union{Tuple, 
                                branch::AbstractString = "**", experdef::AbstractString = "*", base = 1)
     moments = map(v -> v isa TFI.AbstractMoment ? v : TFI.SimulationMoment(v), moments)
     table = OutputVault.assemble_moments(root, moments; branch, experdef, economies = economy_names)
-    economies = OutputVault.split_by_economy(table; economies = economy_names)
-    absent = [e for e in Symbol.(economy_names) if e ∉ keys(economies)]
+    absent = [e for e in String.(economy_names) if e ∉ table.economy]
     isempty(absent) || throw(KeyError("saved results have no statistics for economies $absent (branch $branch, experdef $experdef)"))
+    economies = OutputVault.split_by_economy(table; key = :economy, order = economy_names)
     return TFI.compare_economies(moments, economies; base)
 end
 

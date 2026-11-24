@@ -109,11 +109,27 @@ using DuckDB
               Set(["ngm", "noirf"])
         @test length(assemble_moments(root, moments; economies = [:ngm]).value) == 4
         memory = EconomyResult(; stats = samples, irf)
-        economies = split_by_economy(table; economies = [:ngm, :ngm2])
+        # runs are named by the full key unless a shorter one is asked for
+        @test Set(keys(split_by_economy(table))) == Set((:main__alt__ngm, :main__alt__ngm2, :main__alt__noirf))
+        economies = split_by_economy(table; key = :economy, order = [:ngm, :ngm2])
         @test keys(economies) == (:ngm, :ngm2) && all(e -> e isa Dict, values(economies))
-        @test keys(split_by_economy(table; economies = [:ngm2, :nope, :ngm])) == (:ngm2, :ngm)   # in that order, absent left out
+        @test keys(split_by_economy(table; key = :economy, order = [:ngm2, :ngm])) == (:ngm2, :ngm)   # in that order
+        @test_throws ArgumentError split_by_economy(table; key = :economy, order = [:ngm, :nope])     # not in the table
+        # the same economy name in two branches: the full key keeps them apart, :economy is an error
+        other = merge(table, (; branch = fill("dev", length(table.value))))
+        both = NamedTuple{keys(table)}(Tuple(vcat(table[k], other[k]) for k in keys(table)))
+        @test length(split_by_economy(both)) == 6
+        @test_throws ArgumentError split_by_economy(both; key = :economy)
+        @test keys(split_by_economy(both; key = (:branch, :economy), order = [:dev__ngm, :main__ngm])) == (:dev__ngm, :main__ngm)
+        # disjoint rows of two runs with the same economy name are not merged either
+        part(b, rows) = NamedTuple{keys(table)}(Tuple(k === :branch ? fill(b, length(rows)) : table[k][rows] for k in keys(table)))
+        ngm_rows = findall(==("ngm"), table.economy)
+        disjoint = let a = part("main", ngm_rows[1:1]), b = part("dev", ngm_rows[2:2])
+            NamedTuple{keys(table)}(Tuple(vcat(a[k], b[k]) for k in keys(table)))
+        end
+        @test_throws ArgumentError split_by_economy(disjoint; key = :economy)
         @test getmoment(economies.ngm, moments.irf_K) == getmoment(memory, moments.irf_K)
-        @test_throws ArgumentError split_by_economy(merge(table, (; economy = fill("ngm", length(table.value)))))   # duplicate rows
+        @test_throws ArgumentError split_by_economy(merge(table, (; economy = fill("ngm", length(table.value)))))   # duplicate rows in one run
         via_root = compare_economies(moments, (:ngm, :ngm2), root; experdef = "alt")
         @test via_root.data == compare_economies(moments, (ngm = memory, ngm2 = memory)).data
         @test via_root.data == compare_economies(moments, economies).data
@@ -132,6 +148,14 @@ using DuckDB
             compare_economies(moments, runs)
         end
         @test via_handles.data == compare_economies(moments, (ngm = memory, ngm2 = memory)).data
+        # the root form names runs by economy: the same name in another branch is an error until narrowed
+        cd(git_dir) do
+            save_result(cfg, RunHandle("ngm"; branch = "dev", experdef = "alt"), (; obj, stats = samples, irf); dirty_repo_check = :ignore)
+        end
+        @test_throws ArgumentError compare_economies(moments, (:ngm, :ngm2), root; experdef = "alt")
+        @test compare_economies(moments, (:ngm, :ngm2), root; branch = "main", experdef = "alt").data == via_root.data
+        # the base economy is the first one named
+        @test compare_economies(moments, (:ngm2, :ngm), root; branch = "main", experdef = "alt").data == via_root.data
     end
 
     # parameters from saved runs
@@ -159,7 +183,7 @@ using DuckDB
         pm = ParameterMoment(name)
         required = assemble_moments(root, (; pm); parameters = false)
         @test count(==("parameter"), required.kind) == 1
-        economies = split_by_economy(all_pars)
+        economies = split_by_economy(all_pars; key = :economy)
         @test getmoment(economies.pars, pm) == value
         @test getmoment(economies.pars, ParameterMoment(name; transformation = TransitionFunctionIteration.Transformations.Pct())) == 100value
         @test_throws KeyError getmoment(economies.nopars, pm)

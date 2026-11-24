@@ -40,6 +40,6 @@
         @test read(joinpath(folder, "solution", "obj.jld2")) == solution_before
         @test keys(load(cfg, rf, :irf).irf.means) == (:up, :uncond)
         @test load(cfg, rf, :stats).stats == saved_stats
-        @test keys(find_matching_results(cfg, "main/res-demo-*")) == (:base,)
+        @test keys(find_matching_results(cfg, "main/res-demo-*"; key = :economy)) == (:base,)
     end
 end
