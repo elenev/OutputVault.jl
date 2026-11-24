@@ -7,7 +7,7 @@ is identified by three names, held in a [`RunHandle`](@ref):
 
 | Field | Meaning | Default |
 |:--|:--|:--|
-| `branch` | the git branch of the code that produced it | the current branch of the working directory |
+| `branch` | the branch folder the run is saved in, normally the git branch of the code that produced it | the current branch of the working directory |
 | `experdef` | the experiment definition: a named set of economies (calibration, version of the model) | `"default"` |
 | `economy` | the economy within the experiment, e.g. `base` or `alt` | required |
 
@@ -28,6 +28,10 @@ nested folder. The names can be anything else: OutputVault imposes no convention
 the DuckDB macros can split them into parts with a regular expression
 ([Querying with DuckDB](@ref)).
 
+When OutputVault returns several runs at once, it names each one by all three names,
+`<branch>__<experdef>__<economy>`, unless you ask for a shorter name (`key = :economy`); a shorter name
+that two runs would share is an error ([`find_matching_results`](@ref)).
+
 ## Components and objects
 
 Inside the run folder, results are grouped into *components*, one folder each, with one file per
@@ -43,6 +47,8 @@ OutputVault, so that tools can find an object in any run. [`LAYOUT`](@ref) is th
 | `irf` | `irf` | impulse responses (statistics and raw paths) |
 | `params` | `params` | the model's scalar parameters |
 | `recursions` | `claims`, `welfare` | interpolants computed at the solution's policies |
+
+A TFI run saved with the Parquet table format looks like this:
 
 ```
 res-v1-base/
@@ -60,17 +66,28 @@ given, so a run can be built in steps (the recursions are often computed after t
 
 ## One folder, one solution
 
-The `solution` component is special. A save that includes `obj` or `stv` first deletes the whole run
-folder, then writes the new solution, so everything in a run folder was computed from the solution
-in it. Saves without solution objects add to the folder, and replace an object saved before.
-The reasons are practical: stale diffs and simulations next to a new solution are the usual way to
-mislead yourself about which results belong to which code.
+The `solution` component is special: everything in a run folder was computed from the solution in it.
+A save that includes `obj` or `stv` therefore makes a new run folder:
+
+1. the new results are written to a temporary folder (`staging_root` of the configuration);
+2. the existing run folder, if any, is renamed aside;
+3. the new folder is moved to the run's path;
+4. the renamed old folder is deleted.
+
+So the old results disappear only once the new ones are in place, and all of them go: a save of `stv`
+alone also removes the saved `obj`. If a step fails, `save_result` warns and says where each folder is
+([Replacing a run](@ref)).
+
+Saves without `obj` or `stv` add to the run folder, replacing objects of the same name, and need the
+run to exist. Stale simulations and diffs next to a new solution are the usual way to mislead yourself
+about which results belong to which code, which is why there is no way to add to a run across solutions.
 
 ## Provenance
 
 The solution folder records the code:
 
-- `git_commit.txt`: the commit id of the repository in the working directory;
+- `git_commit.txt`: the commit id of the git repository containing the working directory of the
+  Julia process (not the repository of the output root, and not chosen by `RunHandle`'s `branch`);
 - if the repository is dirty, `git_staged.diff` and `git_unstaged.diff` (the latter including
   untracked files), unless a diff exceeds 1 MB. The diffs are computed without touching the
   repository's index.
@@ -83,10 +100,14 @@ solution they were computed from, so a simulation can be traced to its solution.
 
 The solution is saved twice by default (`solution_format = (:portable, :native)`):
 
-- **portable**: one file per object (`obj.jld2`, `stv.jld2`) in a documented layout of plain arrays
-  and metadata, readable without the code that wrote it. This is the copy for long-term storage,
-  for other languages and for loading with a rebuilt model ([TransitionFunctionIteration Objects](@ref)).
-- **native**: `res.jld2`, the objects exactly as they are in Julia. Quick to load, but it needs code
+- **portable**: one file per object (`obj.jld2`, `stv.jld2`), each written by the package that
+  supports the object's type. For TransitionFunctionIteration this is a documented layout of plain
+  arrays and metadata that h5py and other HDF5 readers can open, and that loads into a rebuilt model
+  ([TransitionFunctionIteration Objects](@ref)). It is the copy for long-term storage. An object of a
+  type no package supports is saved with JLD2 as a Julia object, in this copy as everywhere else.
+- **native**: `res.jld2`, all solution objects as Julia saved them. Quick to load, but it needs code
   compatible with the code that wrote it, so it is meant for work done soon after the solve.
 
-Every other component is always portable.
+The other components have one copy, saved like the portable one: one file per object, written by the
+package that supports its type (TFI's tables go through the configured [table format](@ref "Table Formats")),
+or with JLD2 for any other value.

@@ -46,30 +46,53 @@ the result lacks, or that is `nothing`, is not saved, and properties outside the
 so one call can be as large or as small as you like:
 
 ```julia
-save_result(rf, (; obj, stv, stats))               # without the simulation
-save_result(rf, (; irf))                           # IRFs computed later: added to the folder (errors if no solution was saved)
+save_result(rf, (; obj, stv, stats))               # a new run, without the simulation
+save_result(rf, (; irf))                           # IRFs computed later: added to the run
 save_result(rf, (; claims))                        # a recursion computed later
 ```
 
-A save with `obj` or `stv` replaces the run's folder ([Runs and the Layout](@ref)). The keyword
-`dirty_repo_check` (`:warn`, the default; `:error`; or `:ignore`) controls what happens when the
-repository has uncommitted changes.
+The first save of a run must include `obj` or `stv`. A save without them adds to an existing run,
+replacing objects of the same name, and is an error (`Economy folder ... does not exist`) if the run
+was never saved. A save with `obj` or `stv` replaces the whole run (below).
+
+Each object is written by the package that supports its type: TFI's tables through the table format,
+TFI's solutions in their plain-data layout ([TransitionFunctionIteration Objects](@ref)). Any other
+value, including a Tables.jl table whose type no package supports, is saved with JLD2 as a Julia object.
+
+The keyword `dirty_repo_check` (`:warn`, the default; `:error`; or `:ignore`) controls what a save with
+a solution does when the repository has uncommitted changes. The repository is the one containing
+Julia's working directory; `RunHandle`'s `branch` names the run's folder and does not change it.
 
 ### Replacing a run
 
-A save with `obj` or `stv` writes the new results to `staging_root` first. It then renames the old
-run folder to `.replaced-<folder>-<time>` next to it, moves the staged folder into place and deletes
-the renamed one. On Windows, a file held open blocks renames and deletes of its folder, and
-Parquet2 keeps the files it has read memory-mapped until Julia's garbage collector has run, so a
-load followed closely by a save can hit this. Nothing is lost or half-deleted when it does:
+A save with `obj` or `stv` puts a new run folder in place of the old one, in four steps:
 
-- If the old folder cannot be renamed, it stays intact at the run's path, the new results stay in
-  `staging_root`, a warning gives both paths, and `save_result` returns the staging path.
-- If only the final delete fails, the new results are in place and a warning names the leftover
-  `.replaced-*` folder, which discovery and DuckDB ignore. Delete it by hand.
+1. it writes the new results to a folder in `staging_root`, `<staging_root>/<branch>/res-<experdef>-<economy>-<time>`;
+2. it renames the existing run folder, if there is one, to `.replaced-res-<experdef>-<economy>-<time>`
+   next to it;
+3. it moves the staged folder to the run's path;
+4. it deletes the renamed old folder.
 
-The cure is to release whatever holds the files (close handles, leave the folder as the working
-directory, let the garbage collector run) and move the staged folder into place.
+`save_result` returns the folder holding the new results: the run's path when all goes well. On
+Windows, an open file blocks renaming and deleting its folder, and Parquet2 keeps files it has read
+open until Julia's garbage collector runs, so a load followed closely by a save can make a step fail.
+Then a warning beginning `RESULTS NOT AT THE RUN'S PATH` gives the paths, or, for the last step, a
+warning names the folder that could not be deleted:
+
+| Step that failed | New results | Old results | Run's path |
+|:--|:--|:--|:--|
+| renaming the old folder (2) | staging folder (returned) | at the run's path, unchanged | the old results |
+| moving the staged folder (3); the old folder renamed back | staging folder (returned) | at the run's path, unchanged | the old results |
+| moving the staged folder (3); renaming back failed too | staging folder (returned) | the `.replaced-*` folder | empty |
+| deleting the old folder (4) | at the run's path (returned) | the `.replaced-*` folder, to delete by hand | the new results |
+
+So check the returned path, or watch for the warning, before relying on the run's path. To finish a
+failed replacement, release whatever holds the files (close open files, leave the folder as a working
+directory, run `GC.gc()`), then move the staging folder to the run's path. If a folder is at the run's
+path, move it aside first; do not copy over it, which would mix the two runs. Folders whose names start
+with `.replaced-` are ignored by `find_matching_results` and the DuckDB macros.
+
+Saves without a solution write directly into the run folder, with none of these steps.
 
 ## Loading
 
@@ -87,22 +110,30 @@ load(rf, :solution; solution_format = :portable, model = MyModel)    # the porta
 ```
 
 A portable solution stores the model's parameters as plain data. To rebuild the Julia object, `model`
-is either a model instance, which is compared with the stored metadata (a warning lists what
-differs), or a model type, which is rebuilt from the metadata with [`model_from_metadata`](@ref).
-Single files can be read directly with `load_solution(path, model)` and `load_steadystate(path, model)`.
+is either a model instance, whose parameters are compared with the stored ones (a warning lists what
+differs; changes to the model's code are not detected), or a model type, which is rebuilt from the metadata with [`model_from_metadata`](@ref).
+Single files can be read directly, with the same choice of `model`: `load_solution(path, model)` and
+`load_steadystate(path, model)`.
 Moment tables saved by sample load as a `NamedTuple` with the samples in the order they were saved.
 
 ## Finding runs
 
 ```julia
-get_results_folders(["base", "alt"]; experdef = "v1")   # (base = RunHandle, alt = RunHandle)
-find_matching_results("main/res-v1-*")           # glob the output root, parse the folder names
+get_results_folders(["base", "alt"]; experdef = "v1")       # (base = RunHandle, alt = RunHandle)
+find_matching_results("main/res-v1-*")                      # (main__v1__alt = RunHandle, main__v1__base = RunHandle)
+find_matching_results("main/res-v1-*"; key = :economy)      # (alt = RunHandle, base = RunHandle)
 ```
 
-[`find_matching_results`](@ref) returns a `NamedTuple` of `RunHandle`s keyed by the shortest
-combination of names that is unique (`economy`, then `experdef_economy`, then
-`branch_experdef_economy`), or by the `key_format` you pass. Folders whose names do not parse as
-`res-<experdef>-<economy>` are ignored.
+[`get_results_folders`](@ref) builds handles for economies you name, in one branch and experdef.
+[`find_matching_results`](@ref) globs the output root and returns the runs whose folders match, in the
+order of their paths. Folders whose names do not parse as `res-<experdef>-<economy>` are skipped.
+
+Each run is named `<branch>__<experdef>__<economy>` (characters other than letters, digits and `_`
+become `_`, so `feature/x` is `feature_x`). `key` picks fewer names: `key = :economy`,
+`key = (:experdef, :economy)` or any other combination of `:branch`, `:experdef` and `:economy`. If two
+runs would get the same name, for example `base` in two branches with `key = :economy`, it is an error
+that lists them: narrow the pattern or use a longer key. [`split_by_economy`](@ref) names runs the same
+way.
 
 ## Where things are
 

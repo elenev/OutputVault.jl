@@ -18,10 +18,10 @@ saved, in layout order. Objects come back as their own types (e.g. a TFI `ModelS
 `SimulationPanel`). The no-config form uses the module-level config.
 
 For the solution, `solution_format` picks the copy that is read: `:native` (`res.jld2`, the
-objects exactly as they were saved; needs compatible code) or `:portable` (one file per object;
-objects that store a model, such as TFI solutions and steady states, need `model`, either a
-model or a model type, see `load_solution`). Other components are always portable and ignore
-both keywords.
+objects as Julia saved them; needs compatible code) or `:portable` (one file per object). Portable
+TFI solutions and steady states need `model`: a model instance, whose parameters are compared with the
+saved ones, or a model type, rebuilt from them (see `load_solution`). Other components have one copy
+and ignore both keywords.
 """
 function FileIO.load(cfg::AbstractConfig, rf::RunHandle, component::Symbol;
                      solution_format::Symbol = :native, model = nothing)
@@ -66,25 +66,29 @@ end
     save_result(rf::RunHandle, result; kwargs...) -> String
 
 Save the properties of `result` that `LAYOUT` names, each in its component's folder under the
-economy folder for `rf`, one file per property. Which objects are saved is the caller's choice:
+run's folder for `rf`, one file per property. Which objects are saved is the caller's choice:
 properties that `result` lacks or that are `nothing` are not saved; properties outside the
-layout are ignored. Returns the folder holding the results.
+layout are ignored. Each object is written by the package that supports its type (`write_object`),
+or with JLD2 as a Julia object.
 
-The economy folder holds the results of one solution: a save that includes solution objects
-(`obj`, `stv`) replaces the folder, so that no results of an earlier solution remain. The new
-results are written to `staging_root(cfg)` first, then the old folder is renamed aside, the new
-one moved into place and the old one deleted. If a step fails (on Windows, files held open, such
-as ones a load memory-mapped, block renames and deletes), nothing is lost or half-deleted: a
-warning gives the paths, the old results stay at the economy folder, and the return value is the
-staging folder holding the new results. Saves without solution objects (e.g. IRFs computed
-later) add to the economy folder and error if it does not exist: results are saved only for a
-run whose solution was saved. Only solution saves create folders.
+A save that includes `obj` or `stv` makes a new run folder holding only what it saves. It writes
+the new results to a folder in `staging_root(cfg)`, renames the existing run folder (if any) aside,
+moves the new folder to the run's path, and deletes the old one. Everything saved for the run before
+is then gone, including an `obj` when only `stv` is saved. It returns the folder holding the new
+results: the run's path, or, if a rename or move failed (on Windows, open files can block them), the
+staging folder, with a warning that says where the new and the old results are. If only the final
+delete fails, the new results are in place and a warning names the old folder to delete. Check the
+return value before relying on the run's path.
+
+A save without `obj` or `stv` (e.g. IRFs computed later) writes into the existing run folder,
+replacing objects of the same name, and is an error if the run was never saved. It returns the
+run's folder.
 
 The solution is saved in the formats `solution_format(cfg)`: `:portable` writes one file per
-object (as every other component), `:native` writes all its objects to `res.jld2` with JLD2,
-exactly as they are. The solution folder also receives the git commit id (`git_commit.txt`) and,
-for a dirty repository, the staged and unstaged diffs (`git_staged.diff`, `git_unstaged.diff`;
-the latter includes untracked files). Solution objects get the commit id as provenance.
+object, `:native` writes all its objects to `res.jld2` with JLD2. The solution folder also receives
+the git commit id (`git_commit.txt`) of the repository containing Julia's working directory and, for a
+dirty repository, the staged and unstaged diffs (`git_staged.diff`, `git_unstaged.diff`; the latter
+includes untracked files). Solution objects get the commit id as provenance.
 
 # Keyword arguments
 - `dirty_repo_check`: `:warn` (default), `:error`, or `:ignore`. Controls behavior when
@@ -224,9 +228,9 @@ storage_kind(x) = nothing
     write_object(cfg, dir, name, x; provenance)
 
 Write `x` into `dir` as `name.<ext>`. Producers add methods for their types, built on
-`write_table` or `jld2_record` so that the kind is recorded; other objects are stored with JLD2
-as `name.jld2`. `provenance` holds strings identifying the run (the git commit id, for the git
-component).
+`write_table` or `jld2_record` so that the kind is recorded. Without a method for its type, an object
+(a Tables.jl table included) is saved with JLD2 as a Julia object, `name.jld2`. `provenance` holds
+strings identifying the run (the git commit id, for objects of the solution).
 """
 write_object(cfg::AbstractConfig, dir, name, x; provenance = Dict{String,String}()) =
     jldsave(joinpath(dir, name * ".jld2"); value = x)
@@ -362,7 +366,9 @@ function save_solution end
     load_solution(path, mdl)                 # supplied model, compared with the stored metadata
     load_solution(path, M::Type)             # model rebuilt by model_from_metadata(M, metadata)
 
-Restore a solution written by `save_solution`.
+Restore a solution written by `save_solution`. With a model instance, a warning lists the saved
+metadata fields that differ from `model_metadata(mdl)`; the check does not see changes to the
+model's code.
 """
 function load_solution end
 
@@ -377,7 +383,8 @@ function save_steadystate end
     load_steadystate(path, mdl)              # supplied model, compared with the stored metadata
     load_steadystate(path, M::Type)          # model rebuilt by model_from_metadata(M, metadata)
 
-Restore a steady state written by `save_steadystate`.
+Restore a steady state written by `save_steadystate`. The file records the model's metadata, so
+the model is the one supplied (compared with the metadata) or rebuilt from it, as for `load_solution`.
 """
 function load_steadystate end
 
