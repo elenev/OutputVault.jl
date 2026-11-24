@@ -206,21 +206,24 @@ compare_economies(moments, runs)
 
 [`find_matching_results`](@ref) returns the runs whose folders match the pattern. The pattern names
 this script's branch, so runs saved from other branches are not included. `key = :economy` names each
-run by its economy alone. Without it, runs are named `<branch>__<experdef>__<economy>`, which never
-clashes. A shorter name that two runs would share is an error, so `key = :economy` is safe to try. The
+run by its economy alone. Without it, runs are named `<branch>__<experdef>__<economy>` to distinguish
+branches and experiments. Names can still collide when punctuation is replaced with underscores;
+OutputVault reports an error if they do. A shorter name that two runs would share is also an error,
+so `key = :economy` is safe to try. The
 first run is the base of the comparison: here `base`, because the runs come in the order of their
 folder names.
 
 The same comparison through DuckDB, which reads only the files of the runs you name:
 
 ```@example lifecycle2
-table = assemble_moments(root, moments; branch = rf.branch, experdef = "demo")
+table = assemble_moments(root, moments; branch = rf.branch, experdef = "demo",
+                         economies = [:base, :lowrho])
 economies = split_by_economy(table; key = :economy, order = [:base, :lowrho])
 compare_economies(moments, economies)
 ```
 
-`table` is a plain long table, one row per number, that any language can read. The `branch` and
-`experdef` arguments limit it to the runs of this tutorial. [`split_by_economy`](@ref) turns it into one
+`table` is a plain long table, one row per number, that any language can read. The `branch`,
+`experdef` and `economies` arguments limit it to the two runs of this tutorial. [`split_by_economy`](@ref) turns it into one
 entry per run; `order` sets the order and so the base. [Querying with DuckDB](@ref) has the details and
 the same queries from Python.
 

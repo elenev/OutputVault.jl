@@ -126,6 +126,7 @@ to a `SimulationMoment` needs `params` as well:
 using TransitionFunctionIteration
 runs = (base = RunHandle("base"), alt = RunHandle("alt"))
 save_result(runs.base, (; params = collect_parameters(obj_base)))    # saved with the model, see above
+save_result(runs.alt,  (; params = collect_parameters(obj_alt)))
 
 moments = (std_K = SimulationMoment(:K; stat = :std),
            beta  = ParameterMoment(:β),
