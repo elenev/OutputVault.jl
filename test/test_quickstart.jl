@@ -1,5 +1,6 @@
-# The model-free quick start of docs/src/guide/quickstart.md: a tiny producer type, saving, adding a
-# result later, loading, replacement on saving a solution, and a DuckDB query.
+# A run without a model package: a tiny producer type stored as a table, saving, adding a result
+# later, loading, replacement on saving a solution, the git checks, and a DuckDB query. (The quick
+# start page itself runs as written in test_docs.jl.)
 using DuckDB, Tables
 
 struct QSummary

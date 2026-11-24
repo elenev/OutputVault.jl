@@ -90,6 +90,37 @@ end
         end
     end
 
+    @testset "what a save replaces" begin
+        with_tempdir() do root
+            cfg, rf, final = replace_setup(root)
+            cd(git_dir) do
+                save_run(cfg, rf, 1, 1.0)
+                # a solution object set to nothing does not count: the save adds to the run
+                @test save_result(cfg, rf, (; obj = nothing, irf = RSummary(["K"], [0.5]))) == final
+                @test sort(readdir(final)) == ["irf", "solution", "stats"]
+                # a save of stv alone replaces the whole run, obj included
+                @test save_result(cfg, rf, (; stv = (b = 1,)); dirty_repo_check = :ignore) == final
+                @test readdir(final) == ["solution"]
+                @test keys(load(cfg, rf, :solution)) == (:stv,)
+                @test !isfile(joinpath(final, "solution", "obj.jld2"))
+            end
+        end
+    end
+
+    @testset "staged folder cannot be moved: the old folder is restored" begin
+        with_tempdir() do root
+            cfg, rf, final = replace_setup(root)
+            cd(git_dir) do
+                save_run(cfg, rf, 1, 1.0)
+                missing_stage = joinpath(root, "staging", "main", "res-v1-base-0")   # nothing to move
+                path = @test_logs (:warn, r"RESULTS NOT AT THE RUN'S PATH: the staged folder cannot be moved") OutputVault._replace_folder(missing_stage, final)
+                @test path == missing_stage
+                @test load(cfg, rf, :solution).obj == (a = 1,) && load(cfg, rf, :stats).stats.mean == [1.0]
+                @test !any(startswith(".replaced"), readdir(dirname(final)))
+            end
+        end
+    end
+
     @testset "the warning lists every copy" begin
         msg = ""
         logger = Test.TestLogger()

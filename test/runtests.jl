@@ -48,4 +48,5 @@ end
     include("test_lifecycle.jl")
     include("test_quickstart.jl")
     include("test_duckdb.jl")
+    include("test_docs.jl")
 end

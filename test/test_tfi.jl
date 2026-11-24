@@ -119,6 +119,10 @@ end
                 @test same_solution(solp.obj, obj) && solp.obj.model == ngm && solp.stv == stv
             end
             @test_throws ArgumentError load(cfg, rf, :solution; solution_format = :portable)
+            # the steady-state file alone, with a model type or an instance (as in the TFI guide)
+            stv_file = joinpath(epath, "solution", "stv.jld2")
+            @test load_steadystate(stv_file, NeoclassicalGrowthModel) == stv
+            @test load_steadystate(stv_file, ngm) == stv
             @test load(cfg, rf, :stats).stats == stats
             @test load(cfg, rf, :errstats).errstats == errstats
             # moments are written with their row names in a column `variable`, and read back from it
