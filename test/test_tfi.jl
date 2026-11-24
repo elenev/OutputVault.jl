@@ -119,6 +119,10 @@ end
                 @test same_solution(solp.obj, obj) && solp.obj.model == ngm && solp.stv == stv
             end
             @test_throws ArgumentError load(cfg, rf, :solution; solution_format = :portable)
+            # the steady-state file alone, with a model type or an instance (as in the TFI guide)
+            stv_file = joinpath(epath, "solution", "stv.jld2")
+            @test load_steadystate(stv_file, NeoclassicalGrowthModel) == stv
+            @test load_steadystate(stv_file, ngm) == stv
             @test load(cfg, rf, :stats).stats == stats
             @test load(cfg, rf, :errstats).errstats == errstats
             # moments are written with their row names in a column `variable`, and read back from it
@@ -171,12 +175,24 @@ end
             moms = (mean_K = SimulationMoment(:K),)
             @test with_config(() -> compare_economies(moms, (a = rf_s, b = rf_s)), cfg) ==
                   compare_economies(moms, (a = samples, b = samples))
+
+            # a run with a solution and parameters but no stats serves parameter moments (and calculations on them)
+            rf_p = RunHandle("ngm_params"; branch = "testbranch", experdef = "base")
+            save_result(cfg, rf_p, (; obj, params = collect_parameters(obj)); dirty_repo_check = :ignore)
+            pname = first(row_names(collect_parameters(obj)))
+            pmoms = (p = ParameterMoment(pname),
+                     twice = CalculatedMoment(nt -> 2 * nt.p, (p = ParameterMoment(pname),)))
+            from_runs = with_config(() -> compare_economies(pmoms, (a = rf_p, b = rf_p)), cfg)
+            @test from_runs == compare_economies(pmoms, (a = EconomyResult(; params = collect_parameters(obj)),
+                                                         b = EconomyResult(; params = collect_parameters(obj))))
+            # a simulation moment still needs stats, which this run lacks
+            @test_throws Exception with_config(() -> compare_economies((; m = SimulationMoment(:K)), (a = rf_p,)), cfg)
         end
 
         # tables need a table format
         cfg0 = Config(; output_root = root)
         cd(git_dir) do
-            @test_throws ArgumentError save_result(cfg0, RunHandle("nofmt"; branch = "testbranch"), (; stats);
+            @test_throws ArgumentError save_result(cfg0, RunHandle("nofmt"; branch = "testbranch"), (; obj, stats);
                                                    dirty_repo_check = :ignore)
         end
     end

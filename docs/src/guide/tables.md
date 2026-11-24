@@ -1,10 +1,11 @@
 # Table Formats
 
-Tables (simulations, moment tables, IRFs) are stored through the configuration's *table format*,
-so that the choice of file format belongs to the project and not to the code that produces a table.
-A table is any Tables.jl source, written together with its *metadata*: string key-value pairs that
-say what the table is and where it came from. TFI's types restore as their own types from the
-metadata, so a format must keep file-level metadata for them.
+Tables (TFI's simulations, moment tables and IRFs, or a type of your own whose writer calls
+`write_table`) are stored through the configuration's *table format*, so that the choice of file format
+belongs to the project and not to the code that produces a table. A table is written together with its
+*metadata*: string key-value pairs that say what the table is and where it came from. Objects restore as
+their own types from the metadata, so a format must keep file-level metadata for them. Values that are
+not written as tables (see [Writing an Extension](@ref)) are saved with JLD2 whatever the table format.
 
 ## Parquet
 

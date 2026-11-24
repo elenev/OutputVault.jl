@@ -67,7 +67,7 @@ right shape:
 ```julia
 using TransitionFunctionIteration
 result = solve_and_simulate(mdl)
-save_result(rf, merge(result, (; params = collect_parameters(result.obj))))
+save_result(rf, merge(result, (; params = collect_parameters(result.obj))))   # TFI's collect_parameters
 ```
 
 Then, from any language with DuckDB (the macros are `sql/outputvault.sql`):
@@ -118,7 +118,7 @@ using Pkg
 Pkg.add(url = "git@github.com:elenev/OutputVault.jl.git")
 ```
 
-Julia 1.9 or later. Add the packages of the extensions you use.
+Julia 1.12 or later. Add the packages of the extensions you use.
 
 ## Status
 

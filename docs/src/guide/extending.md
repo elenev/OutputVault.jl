@@ -1,22 +1,26 @@
 # Writing an Extension
 
-OutputVault's core stores nothing but what its extensions teach it. A package that has its own types
-to store, or a data format to store them in, extends three small interfaces. Everything below is
-tested against the core with a producer type of its own; `OutputVaultTFIExt` is the full example.
+Without help, OutputVault saves any value with JLD2, as a Julia object. To store a package's types in
+files that other languages read (plain arrays, tables), or to store tables in another file format,
+add methods to OutputVault's interfaces. `OutputVaultTFIExt`, which stores TransitionFunctionIteration's
+types, is a complete example.
 
 ## The producer interface
 
 A *producer* is a package with types to store. For each type it defines a *storage kind*, a
-namespaced string that is recorded in the file and selects the reader when the object is loaded:
+string starting with the package's name that is recorded in the file and selects the reader when the
+object is loaded, plus a writer and a reader:
 
 | Function | Defined by the producer for its type | Purpose |
 |:--|:--|:--|
-| `OutputVault.storage_kind(x)` | `"MyPackage.Counter"` | the kind recorded in the file; default `nothing` (the object is stored with JLD2 as it is) |
-| `OutputVault.write_object(cfg, dir, name, x; provenance)` | write `x` into `dir` as `name.<ext>` | the writer |
+| `OutputVault.storage_kind(x)` | `"MyPackage.Counter"` | the kind recorded in the file; default `nothing` |
+| `OutputVault.write_object(cfg, dir, name, x; provenance)` | write `x` into `dir` as `name.<ext>` | the writer; default: JLD2, `name.jld2` |
 | `OutputVault.read_kind(Val(kind), ...)` | rebuild an object of that kind | the reader |
 
-The core never names a producer's keys, and producers never name the core's: the producer writes
-through two helpers that record the kind, and the reader receives the file.
+Without a `write_object` method for its type, an object is saved with JLD2 as a Julia object, whatever
+else it is: a Tables.jl table is not written as a table unless its `write_object` calls `write_table`.
+The writer uses one of two helpers, `jld2_record` for plain data and `write_table` for tables, which
+record the kind; the reader receives the file.
 
 ### A type stored as plain data
 
@@ -113,8 +117,8 @@ Overload both for a model type whose fields are not all plain data.
 
 ## A new table format
 
-Formats are the other axis: see [Table Formats](@ref) for the three functions and the package
-extension pattern (`OutputVaultParquet2Ext` is the model: eleven lines).
+See [Table Formats](@ref) for the functions a format implements and how to put them in a package
+extension; `OutputVaultParquet2Ext` is a short example.
 
 ## What the layout does not do
 
@@ -124,6 +128,6 @@ is a change to OutputVault itself, which keeps every project's runs the same sha
 
 ## Testing an extension
 
-Test against a temporary output root and a throwaway git repository (the solution component records
-the commit id): save a result with `dirty_repo_check = :ignore`, `load` it, and compare. OutputVault's
-own tests do exactly this for a test-only producer type, in `test/test_save_load.jl`.
+Test against a temporary output root and a throwaway git repository (a saved solution records the
+commit id): save a result with `dirty_repo_check = :ignore`, `load` it, and compare it with the
+original. A result other than a solution needs a run to add to, so save a solution first.

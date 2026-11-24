@@ -2,7 +2,11 @@
     RunHandle(economy; branch=current_branch(), experdef="default")
     RunHandle(; branch, experdef, economy)
 
-Identifies a saved run by branch, experiment definition, and economy name.
+Identifies a saved run by branch, experiment definition, and economy name. The run's folder is
+`<output_root>/<branch>/res-<experdef>-<economy>`.
+
+`branch` defaults to the git branch of Julia's working directory. Passing it chooses only the folder:
+the git commit saved with a solution is always that of the working directory's repository.
 
 All fields are coerced to `String` on construction. `experdef` must not contain `-`: the run's
 folder is `res-<experdef>-<economy>`, and readers (the DuckDB macros in `outputvault.sql`) split
@@ -36,7 +40,7 @@ every project's runs have the same structure and tools can find objects across r
 | `errstats`   | `errstats`            |
 | `simulation` | `simseries`, `errs`   |
 | `irf`        | `irf`                 |
-| `params`     | `params` (the model's scalar parameters, see `collect_parameters`) |
+| `params`     | `params` (the model's scalar parameters, see TFI's `collect_parameters`) |
 | `recursions` | `claims`, `welfare` (interpolants of recursions computed at a solution's policies; each is saved when it is computed, the solution is not touched) |
 """
 const LAYOUT = (solution = (:obj, :stv), stats = (:stats,), errstats = (:errstats,),
@@ -165,14 +169,14 @@ saved is chosen in each `save_result` call.
 # Arguments
 - `output_root`: filesystem root for all saved outputs.
 - `table_format`: an `AbstractTableFormat` (e.g. `OutputVault.Formats.ParquetFormat()`), needed to
-  save tables (simulations, moments, IRFs).
-- `solution_format`: how the solution is saved: `:portable` (one file per object in a documented
-  layout of plain arrays, readable without the code that wrote it), `:native` (all of the
-  solution's objects in one JLD2 file, `res.jld2`, exactly as they are in Julia), or both. Other
-  components are always portable.
-- `staging_root`: where `save_result` writes a replacing solution before moving it into place. If
-  the move cannot be made (on Windows, files held open block it), the results stay here. Default:
-  a folder in the system temp directory.
+  save objects written as tables (TFI's simulations, moments and IRFs).
+- `solution_format`: how the solution is saved: `:portable` (one file per object, written by the
+  package that supports its type; for TFI a documented layout of plain arrays; JLD2 for other
+  values), `:native` (all of the solution's objects in one JLD2 file, `res.jld2`, as Julia objects),
+  or both. Other components are saved one file per object, like the portable copy.
+- `staging_root`: where `save_result` writes a new solution's run folder before moving it into place.
+  If the move fails (on Windows, open files can block it), the new results stay here and
+  `save_result` warns. Default: a folder in the system temp directory.
 """
 function Config(;
     output_root::String,

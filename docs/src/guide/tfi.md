@@ -2,9 +2,9 @@
 
 `OutputVaultTFIExt` stores the types of
 [TransitionFunctionIteration.jl](https://github.com/elenev/TransitionFunctionIteration.jl). It loads
-when TransitionFunctionIteration, StaticArrays and StructArrays are loaded. TFI itself writes no
-files: it defines Tables.jl interfaces and metadata for its result types, and this extension writes
-them with the project's [table format](@ref "Table Formats").
+when TransitionFunctionIteration is loaded. TFI's tables (simulations, moments, IRFs) are written with
+the project's [table format](@ref "Table Formats"), so a `Config` that saves them needs one, such as
+Parquet.
 
 ## What is stored where
 
@@ -43,12 +43,17 @@ Tfct/<var>                               arrays over the grid axes and next peri
 Pfct/__bounds/<var>, Tfct/__bounds/<var> [lower, upper], plus __names
 ```
 
-A steady-state file has `meta/...`, the model's metadata, and `guess/`, `endog/`, `exog/`, `values/`
-(one entry per name plus `__names`). It does not store the model: a steady state takes its model
-from the solution file in the same folder.
+A steady-state file has `meta/...`, the model's metadata under `meta/model/`, and `guess/`, `endog/`,
+`exog/`, `values/` (one entry per name plus `__names`). Like a solution, it loads with a model you
+supply, either an instance that is compared with the saved metadata or a type that is rebuilt from it:
 
-The schema version is an integer that changes only when a change breaks readers of earlier files;
-the reader accepts only the current version, and added entries do not change it.
+```julia
+load(rf, :solution; solution_format = :portable, model = MyModel)    # (obj = ..., stv = ...)
+load_steadystate(joinpath(OutputVault.economy_folder(rf), "solution", "stv.jld2"), MyModel)
+```
+
+The schema version is an integer that changes only when a change breaks readers of earlier files.
+OutputVault reads only files of the current version; added entries do not change it.
 
 ### Rebuilding the model
 
@@ -64,9 +69,15 @@ load(rf, :solution; solution_format = :portable, model = MyModel)     # a type: 
 
 The default rebuild is `MyModel(; metadata...)`. A model package whose models need more (derived
 objects that were dropped, nested parameter structs) overloads [`model_metadata`](@ref) and
-[`model_from_metadata`](@ref) for its type. The solution id (`solution_id` in TFI), a hash of the grid and
-the values of the functions, is stored and checked on load, and a mismatch warns that the file may be
-corrupted.
+[`model_from_metadata`](@ref) for its type.
+
+Passing an instance compares only this metadata: a change to the model's code that leaves its
+parameters alone gives no warning. The record of the code is the git commit and diffs in the solution
+folder ([Provenance](@ref)).
+
+The solution id (`solution_id` in TFI), a hash of the grid and the values of the functions, is stored
+and checked on load, and a mismatch warns that the file may be corrupted. It checks the numbers in the
+file, not the model's equations.
 
 ## Tables
 
@@ -83,10 +94,11 @@ each file's metadata so that `load` returns them in order.
 ## Parameters and recursions
 
 ```julia
+using TransitionFunctionIteration
 save_result(rf, (; params = collect_parameters(obj)))
 ```
 
-[`collect_parameters`](@ref) turns the model's scalar parameters (every real or Boolean field,
+TFI's `collect_parameters` turns the model's scalar parameters (every real or Boolean field,
 a Boolean as 0 or 1) into a one-column `MomentArray` with row key `parameter`, which is what the
 `params` component holds and what a DuckDB query returns as `vault_params`. A model package can
 define its own method to choose differently.
@@ -102,6 +114,27 @@ using TransitionFunctionIteration
 compare_economies(moments, (base = RunHandle("base"), alt = RunHandle("alt")))
 ```
 
-compares moments (see TFI's guide on moments) across runs read with the active configuration: each
-run's `stats`, and its IRFs if a moment is an `ImpulseMoment`. For queries over many runs, `assemble_moments` reads only the statistics that the moments need, in one
-DuckDB query ([Querying with DuckDB](@ref)).
+compares moments (see TFI's guide on moments) across runs read with the active configuration. The
+names of the NamedTuple are the names of the economies in the comparison, and the first is the base.
+Only the components the moments need are loaded from each run: `stats` for simulation moments, `irf`
+for impulse moments, `params` for parameter moments, and for a calculated moment those of its inputs,
+however deeply nested. A run without a component that is needed is an error. So
+`@CalculatedMoment cor_r(:C) * sd(:C) / sd(:r)` needs only `stats`, and a ratio of a `ParameterMoment`
+to a `SimulationMoment` needs `params` as well:
+
+```julia
+using TransitionFunctionIteration
+runs = (base = RunHandle("base"), alt = RunHandle("alt"))
+save_result(runs.base, (; params = collect_parameters(obj_base)))    # saved with the model, see above
+save_result(runs.alt,  (; params = collect_parameters(obj_alt)))
+
+moments = (std_K = SimulationMoment(:K; stat = :std),
+           beta  = ParameterMoment(:β),
+           std_K_per_beta = CalculatedMoment(nt -> nt.std_K / nt.beta,
+                                             (std_K = SimulationMoment(:K; stat = :std),
+                                              beta = ParameterMoment(:β))))
+compare_economies(moments, runs)
+```
+
+For many runs, or runs in a synced folder, `assemble_moments` selects the numbers the moments need
+with DuckDB ([Querying with DuckDB](@ref)).

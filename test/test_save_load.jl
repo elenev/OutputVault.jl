@@ -62,9 +62,28 @@ OutputVault.read_kind(::Val{Symbol("OutputVaultTests.Kinded")}, path; model = no
                 @test load(cfg, rf, :stats) == (stats = res.stats,)
             end
 
+            @testset "load of a missing run creates no folders" begin
+                rf_nobranch = RunHandle("usa"; branch="nobranch", experdef="base")
+                @test_throws ErrorException load(cfg, rf_nobranch, :solution)
+                @test !isdir(joinpath(root, "nobranch"))
+            end
+
+            @testset "results without a solution need the run's folder" begin
+                rf_nosol = RunHandle("nosol"; branch="nosolbranch", experdef="base")
+                err = try save_result(cfg, rf_nosol, (; stats = 1)); nothing catch e; e end
+                @test err isa ErrorException
+                @test occursin("res-base-nosol", err.msg)
+                @test !isdir(joinpath(root, "nosolbranch"))
+                # after the solution is saved, later results are added
+                save_result(cfg, rf_nosol, (; obj = 1.0); dirty_repo_check=:ignore)
+                epath = save_result(cfg, rf_nosol, (; stats = 1))
+                @test load(cfg, rf_nosol, :stats) == (stats = 1,)
+                @test sort(readdir(epath)) == ["solution", "stats"]
+            end
+
             @testset "load missing component errors" begin
                 rf_missing = RunHandle("ghost"; branch="testbranch", experdef="base")
-                mkpath(OutputVault.economy_folder(cfg, rf_missing; create=true))
+                mkpath(OutputVault._economy_path(cfg, rf_missing))
                 @test_throws ErrorException load(cfg, rf_missing, :solution)
             end
 
@@ -131,7 +150,7 @@ OutputVault.read_kind(::Val{Symbol("OutputVaultTests.Kinded")}, path; model = no
 
             @testset "components saved by OutputVault 0.1 still load" begin
                 rf_old = RunHandle("legacy"; branch="testbranch", experdef="base")
-                epath  = OutputVault.economy_folder(cfg, rf_old; create=true)
+                epath  = mkpath(OutputVault._economy_path(cfg, rf_old))
                 jldsave(joinpath(epath, "solution.jld2"); obj=2.5, stv=3, git_commit_id="abc")
                 @test load(cfg, rf_old, :solution) == (obj=2.5, stv=3)
             end

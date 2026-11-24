@@ -63,8 +63,27 @@ using DuckDB
                 ORDER BY economy")
         @test keys(sp) == (:branch, :experdef, :economy, :model, :scheme)
         @test sp.model == ["arm", "frm"] && sp.scheme == ["", "init-a"]
-        sps = q("SELECT * FROM vault_stats('$root', '**', '*', '^([^_]+)(?:_(.+))?\$', ['model', 'scheme']) LIMIT 1")
-        @test keys(sps) == (:branch, :experdef, :economy, :model, :scheme, :sample, :variable, :stat, :value)
+        # every macro with the economy split: the split columns after economy, then the macro's own columns
+        split_args = "'**', '*', '^([^_]+)(?:_(.+))?\$', ['model', 'scheme']"
+        own = (vault_stats = (:sample, :variable, :stat, :value), vault_errstats = (:equation, :stat, :value),
+               vault_params = (:parameter, :value), vault_irf = (:shock, :stat, :period, :variable, :value),
+               vault_runs = ())
+        for (macro_, cols) in pairs(own)
+            plain = q("SELECT * FROM $macro_('$root')")
+            split = q("SELECT * FROM $macro_('$root', $split_args)")
+            @test keys(split) == (:branch, :experdef, :economy, :model, :scheme, cols...)
+            @test keys(plain) == (:branch, :experdef, :economy, cols...)
+            @test length(split.economy) == length(plain.economy)
+            @test Set(zip(split.economy, split.model)) ⊆ Set([("arm", "arm"), ("frm_init-a", "frm")])
+        end
+        sims = q("SELECT * FROM vault_simulation('$root', $split_args)")
+        @test keys(sims)[1:5] == (:branch, :experdef, :economy, :model, :scheme) && length(sims.economy) == length(simseries.data)
+        # the named-argument forms, one at a time
+        @test only(unique(q("SELECT economy FROM vault_errstats('$root', economies := ['arm'])").economy)) == "arm"
+        @test only(unique(q("SELECT economy FROM vault_irf('$root', branch_glob := 'feat/*')").economy)) == "frm_init-a"
+        @test only(unique(q("SELECT economy FROM vault_params('$root', experdef_glob := 'base')").economy)) == "frm_init-a"
+        @test only(unique(q("SELECT economy FROM vault_simulation('$root', economies := ['frm*'])").economy)) == "frm_init-a"
+        @test q("SELECT economy FROM vault_runs('$root', branch_glob := 'feat/*', experdef_glob := 'base')").economy == ["frm_init-a"]
     end
 
     # moments read from the saved runs: the same table as from the results in memory
@@ -89,18 +108,149 @@ using DuckDB
         @test Set(Tables.columntable(DBInterface.execute(con, "SELECT DISTINCT economy FROM vault_stats('$root', economies := ['ngm', 'noirf'])")).economy) ==
               Set(["ngm", "noirf"])
         @test length(assemble_moments(root, moments; economies = [:ngm]).value) == 4
-        memory = EconomyResults(samples, irf)
-        economies = (:ngm, :ngm2)
-        via_root = compare_economies(moments, economies, root; experdef = "alt")
+        memory = EconomyResult(; stats = samples, irf)
+        # runs are named by the full key unless a shorter one is asked for
+        @test Set(keys(split_by_economy(table))) == Set((:main__alt__ngm, :main__alt__ngm2, :main__alt__noirf))
+        economies = split_by_economy(table; key = :economy, order = [:ngm, :ngm2])
+        @test keys(economies) == (:ngm, :ngm2) && all(e -> e isa Dict, values(economies))
+        @test keys(split_by_economy(table; key = :economy, order = [:ngm2, :ngm])) == (:ngm2, :ngm)   # in that order
+        @test_throws ArgumentError split_by_economy(table; key = :economy, order = [:ngm, :nope])     # not in the table
+        # the same economy name in two branches: the full key keeps them apart, :economy is an error
+        other = merge(table, (; branch = fill("dev", length(table.value))))
+        both = NamedTuple{keys(table)}(Tuple(vcat(table[k], other[k]) for k in keys(table)))
+        @test length(split_by_economy(both)) == 6
+        @test_throws ArgumentError split_by_economy(both; key = :economy)
+        @test keys(split_by_economy(both; key = (:branch, :economy), order = [:dev__ngm, :main__ngm])) == (:dev__ngm, :main__ngm)
+        # disjoint rows of two runs with the same economy name are not merged either
+        part(b, rows) = NamedTuple{keys(table)}(Tuple(k === :branch ? fill(b, length(rows)) : table[k][rows] for k in keys(table)))
+        ngm_rows = findall(==("ngm"), table.economy)
+        disjoint = let a = part("main", ngm_rows[1:1]), b = part("dev", ngm_rows[2:2])
+            NamedTuple{keys(table)}(Tuple(vcat(a[k], b[k]) for k in keys(table)))
+        end
+        @test_throws ArgumentError split_by_economy(disjoint; key = :economy)
+        @test getmoment(economies.ngm, moments.irf_K) == getmoment(memory, moments.irf_K)
+        @test_throws ArgumentError split_by_economy(merge(table, (; economy = fill("ngm", length(table.value)))))   # duplicate rows in one run
+        via_root = compare_economies(moments, (:ngm, :ngm2), root; experdef = "alt")
         @test via_root.data == compare_economies(moments, (ngm = memory, ngm2 = memory)).data
-        @test via_root.data == compare_economies(moments, economies, table).data
+        @test via_root.data == compare_economies(moments, economies).data
         @test_throws KeyError compare_economies((x = SimulationMoment(:K; stat = :p99),), (:ngm,), root)
+        @test_throws KeyError getmoment(economies.ngm, SimulationMoment(:K; stat = :p99))
+        # a calculated moment, with named moments, reads from the table as from memory
+        calc = @CalculatedMoment moments mean_K / a_std_K + irf_K
+        @test getmoment(economies.ngm, calc) == getmoment(memory, calc)
+        # rows of a moment
+        @test OutputVault.momentrows(moments.irf_K) == ((kind = :impulse, group = :pos, variable = :K, stat = :mean, period = 3),
+                                                        (kind = :impulse, group = :uncond, variable = :K, stat = :mean, period = 3))
+        @test length(OutputVault.momentrows(calc)) == 4       # mean_K, a_std_K, and irf_K's two rows, none repeated
         # the same over RunHandles of the active configuration, reading the IRFs for impulse moments
         runs = (ngm = RunHandle("ngm"; branch = "main", experdef = "alt"), ngm2 = RunHandle("ngm2"; branch = "main", experdef = "alt"))
         via_handles = with_config(cfg) do
             compare_economies(moments, runs)
         end
         @test via_handles.data == compare_economies(moments, (ngm = memory, ngm2 = memory)).data
+        # the root form names runs by economy: the same name in another branch is an error until narrowed
+        cd(git_dir) do
+            save_result(cfg, RunHandle("ngm"; branch = "dev", experdef = "alt"), (; obj, stats = samples, irf); dirty_repo_check = :ignore)
+        end
+        @test_throws ArgumentError compare_economies(moments, (:ngm, :ngm2), root; experdef = "alt")
+        @test compare_economies(moments, (:ngm, :ngm2), root; branch = "main", experdef = "alt").data == via_root.data
+        # the base economy is the first one named
+        @test compare_economies(moments, (:ngm2, :ngm), root; branch = "main", experdef = "alt").data == via_root.data
+    end
+
+    # parameters from saved runs
+    with_tempdir() do root
+        cfg = Config(; output_root = root, table_format = PARQUET)
+        cd(git_dir) do
+            save_result(cfg, RunHandle("pars"; branch = "main", experdef = "alt"),
+                        (; obj, stats = samples, params = collect_parameters(obj)); dirty_repo_check = :ignore)
+            save_result(cfg, RunHandle("nopars"; branch = "main", experdef = "alt"),
+                        (; obj, stats = samples); dirty_repo_check = :ignore)
+        end
+        pars = collect_parameters(obj)
+        name = first(row_names(pars))
+        value = getmoment(pars, name, :value)
+        K_moments = (mean_K = SimulationMoment(:K),)
+        nrow(table) = length(table.value)
+        all_pars = assemble_moments(root, K_moments)
+        @test Set(all_pars.kind) == Set(["simulation", "parameter"]) && Set(all_pars.economy) == Set(["pars", "nopars"])
+        @test count(==("parameter"), all_pars.kind) == length(row_names(pars))                 # the economy without params has none
+        @test all(==("pars"), all_pars.economy[all_pars.kind .== "parameter"])
+        @test nrow(assemble_moments(root, K_moments; parameters = false)) == 2
+        named = assemble_moments(root, K_moments; parameters = [name])
+        @test count(==("parameter"), named.kind) == 1 && only(named.variable[named.kind .== "parameter"]) == String(name)
+        # a ParameterMoment is fetched even with parameters = false
+        pm = ParameterMoment(name)
+        required = assemble_moments(root, (; pm); parameters = false)
+        @test count(==("parameter"), required.kind) == 1
+        economies = split_by_economy(all_pars; key = :economy)
+        @test getmoment(economies.pars, pm) == value
+        @test getmoment(economies.pars, ParameterMoment(name; transformation = TransitionFunctionIteration.Transformations.Pct())) == 100value
+        @test_throws KeyError getmoment(economies.nopars, pm)
+        @test_throws KeyError getmoment(economies.pars, ParameterMoment(:not_a_parameter))
+        # and a calculated moment of a statistic and a parameter
+        named = (pm = pm, mean_K = SimulationMoment(:K))
+        calc = @CalculatedMoment named pm * mean_K
+        memory = EconomyResult(; stats = samples, params = pars)
+        @test getmoment(economies.pars, calc) == getmoment(memory, calc)
+        # over RunHandles, the parameters are loaded when a moment needs them
+        runs = (pars = RunHandle("pars"; branch = "main", experdef = "alt"),)
+        via_handles = with_config(cfg) do
+            compare_economies((calc = calc,), runs)
+        end
+        @test via_handles(:calc, :pars) == getmoment(memory, calc)
+    end
+
+    @testset "Impulse basis across memory, reload and selected rows" begin
+        T = TransitionFunctionIteration.Transformations
+        source = (__shock = repeat(["up", "control", "uncond"], 2),
+                  __stat = repeat(["mean", "std"], inner = 3),
+                  __period = ones(Int, 6), C = [6.0, 2.0, 3.0, 0.6, 0.2, 0.3])
+        full = IRFResult(source)
+        single = IRFResult(map(v -> v[[1, 4]], source))
+        reordered = IRFResult(map(v -> v[[3, 2, 1, 6, 5, 4]], source))
+        level = ImpulseMoment(:C, :up, 1; basis = :absent, compare_transformation = T.DiffLevel())
+        ratio = ImpulseMoment(:C, :up, 1; basis = :control, transformation = T.RatioPct())
+        diff = ImpulseMoment(:C, :up, 1; basis = :control, transformation = T.DiffLevel())
+        default_ratio = ImpulseMoment(:C, :up, 1; transformation = T.RatioPct())
+        default_diff = ImpulseMoment(:C, :up, 1; transformation = T.DiffLevel())
+        nested = CalculatedMoment(nt -> 2nt.x, (x = CalculatedMoment(nt -> nt.r, (r = ratio,)),))
+        specs = (; level, ratio, diff, default_ratio, default_diff, nested)
+        @test length(OutputVault.momentrows(level)) == 1
+        @test last(OutputVault.momentrows(ratio)).group == :control
+        with_tempdir() do root
+            cfg = Config(; output_root = root, table_format = PARQUET)
+            runs = (a = RunHandle("a"; branch = "main"), b = RunHandle("b"; branch = "main"))
+            lone = RunHandle("single"; branch = "main")
+            cd(git_dir) do
+                save_result(cfg, runs.a, (; obj = (marker = 1,), irf = full); dirty_repo_check = :ignore)
+                save_result(cfg, runs.b, (; obj = (marker = 1,), irf = reordered); dirty_repo_check = :ignore)
+                save_result(cfg, lone, (; obj = (marker = 1,), irf = single); dirty_repo_check = :ignore)
+            end
+            rows = assemble_moments(root, specs; branch = "main", economies = [:a, :b], parameters = false)
+            saved = split_by_economy(rows; key = :economy, order = [:a, :b])
+            for run in values(runs), m in values(specs)
+                restored = load(cfg, run, :irf).irf
+                @test getmoment(restored, m) == getmoment(full, m)
+                @test getmoment(saved[Symbol(run.economy)], m) == getmoment(full, m)
+            end
+            expected = compare_economies(specs, (a = full, b = reordered))
+            @test compare_economies(specs, saved).data == expected.data
+            @test with_config(() -> compare_economies(specs, runs), cfg).data == expected.data
+            @test compare_economies(specs, (:a, :b), root; branch = "main").data == expected.data
+            only_level = assemble_moments(root, (; level); economies = [:single], parameters = false)
+            @test length(only_level.value) == 1
+            @test getmoment(split_by_economy(only_level; key = :economy).single, level) == 6.0
+            @test getmoment(load(cfg, lone, :irf).irf, level) == 6.0
+            missing = assemble_moments(root, (; ratio, default_ratio); economies = [:single], parameters = false)
+            missing_source = split_by_economy(missing; key = :economy).single
+            @test_throws KeyError getmoment(missing_source, ratio)
+            @test_throws KeyError getmoment(missing_source, default_ratio)
+            self = ImpulseMoment(:C, :up, 1; basis = :up, transformation = T.DiffLevel())
+            self_rows = assemble_moments(root, (; self); economies = [:single], parameters = false)
+            @test length(self_rows.value) == 1
+            @test getmoment(split_by_economy(self_rows; key = :economy).single, self) == 0.0
+        end
     end
 
     # Windows separators in the root and the file path

@@ -25,11 +25,10 @@ src/
   save_load.jl     -- FileIO.load, save_result, producer interface (storage_kind,
                       write_object, write_table, write_table_parts, jld2_record,
                       recorded_kind, read_kind), stubs for save_solution, load_solution,
-                      save_steadystate, load_steadystate, model_metadata, model_from_metadata,
-                      collect_parameters
+                      save_steadystate, load_steadystate, model_metadata, model_from_metadata
   discovery.jl     -- find_matching_results, get_results_folders, key helpers
-  duckdb.jl        -- duckdb_sql_path, duckdb_statements, assemble_moments (stub; the SQL is
-                      sql/outputvault.sql)
+  duckdb.jl        -- duckdb_sql_path, duckdb_statements, assemble_moments, split_by_economy,
+                      momentrows (stubs; the SQL is sql/outputvault.sql)
 sql/
   outputvault.sql  -- DuckDB table macros over an output root (vault_stats, vault_errstats,
                       vault_params, vault_irf, vault_simulation, vault_runs); run identity parsed
@@ -39,8 +38,9 @@ ext/
   OutputVaultTFIExt.jl      -- (TFI, StaticArrays, StructArrays) writers/readers for TFI types,
                                solution and steady-state file layouts (schema version 2),
                                Interpolant storage, model_metadata for TFI models,
-                               collect_parameters default, compare_economies over RunHandles
-  OutputVaultDuckDBExt.jl   -- (DuckDB, Tables, TFI) assemble_moments, compare_economies over a root
+                               compare_economies over RunHandles
+  OutputVaultDuckDBExt.jl   -- (DuckDB, Tables, TFI) momentrows, assemble_moments, split_by_economy,
+                               momentvalues for a per-economy Dict, compare_economies over a root
 docs/
   make.jl, Project.toml, src/ -- Documenter site (index, guide/*, api)
 test/                -- one file per source file, plus test_tfi.jl, test_duckdb.jl, fixtures
@@ -130,9 +130,10 @@ is: its row key (a type parameter in TFI) names the column of row names.
 Model metadata (`model_metadata`, `model_from_metadata`) are owned by OutputVault; the extension
 defines them for `TFI.AbstractModel` (fields kept recursively: reals, strings, symbols, numeric
 arrays/tuples up to 1000 elements, depth 4), and model packages overload them for their own types.
-`collect_parameters(obj_or_model)` -> one-column MomentArray (`parameter` rows) of every scalar real
-field; `TFI.compare_economies(moments, NamedTuple of RunHandle)` loads each run's stats (and IRFs for
-`ImpulseMoment`s).
+`collect_parameters(obj_or_model)` (in TFI, exported there) -> one-column MomentArray (`parameter` rows)
+of every scalar real field; `TFI.compare_economies(moments, NamedTuple of RunHandle)` loads each run's
+stats (and IRFs for `ImpulseMoment`s, parameters for `ParameterMoment`s, also as inputs of calculated
+moments).
 
 ## DuckDB (sql/outputvault.sql, OutputVaultDuckDBExt.jl)
 
@@ -143,7 +144,11 @@ column of row names differs per file (`variable`, `equation`, `parameter`: the T
 there is one long-form macro each. `assemble_moments(root, moments; branch, experdef, economies)`
 queries only runs that have the component (`vault_runs` lists runs from their solution folders
 without opening data files; a pattern that matches no file is an error in DuckDB), one query per
-kind of moment, returning the long table TFI's `MomentTable` reads.
+kind of row (statistics, IRF points, parameters), returning a long String table. `split_by_economy` turns
+it into one Dict per economy keyed by `momentrows(moment)` rows (Symbols); TFI's `getmoment` and
+`compare_economies` read those through `TFI.momentvalues(::AbstractDict, leaf moment)`. `momentrows`
+is the one place where moment types meet the saved layout. `parameters = true|false|names` adds saved
+parameter rows; a `ParameterMoment` among the moments always fetches its own.
 
 ## Discovery (discovery.jl)
 
@@ -158,9 +163,9 @@ RunHandle, Config, TableFormat, LAYOUT
 set_config!, with_config, output_path
 save_result, load
 save_solution, load_solution, save_steadystate, load_steadystate
-model_metadata, model_from_metadata, collect_parameters
+model_metadata, model_from_metadata
 find_matching_results, get_results_folders
-duckdb_sql_path, duckdb_statements, assemble_moments
+duckdb_sql_path, duckdb_statements, assemble_moments, split_by_economy
 ```
 
 Not exported (`OutputVault.` prefix): `AbstractConfig` and accessors, `AbstractTableFormat`,

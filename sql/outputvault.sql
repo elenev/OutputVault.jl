@@ -2,7 +2,7 @@
 --
 -- Load this file into a DuckDB connection, then query the table macros with the output root
 -- (the `output_root` of the project's OutputVault Config), for example
---   SELECT * FROM vault_stats('/path/to/output_root', experdef := 'v1') WHERE economy = 'base';
+--   SELECT * FROM vault_stats('/path/to/output_root', experdef_glob := 'v1') WHERE economy = 'base';
 -- Statements are separated by ';' at the end of a line; clients that run one statement per call
 -- (DuckDB.jl) run them one by one (OutputVault.duckdb_statements() returns them).
 --
@@ -98,7 +98,7 @@ CREATE OR REPLACE MACRO vault_glob(root, branch_glob, experdef_glob, files) AS
 
 -- the globs of a component's files for a list of economy patterns (read_parquet takes a list)
 CREATE OR REPLACE MACRO vault_globs(root, branch_glob, experdef_glob, economies, files) AS
-    list_transform(economies, e -> root || '/' || branch_glob || '/res-' || experdef_glob || '-' || e || '/' || files);
+    list_transform(economies, lambda e: root || '/' || branch_glob || '/res-' || experdef_glob || '-' || e || '/' || files);
 
 -- the runs under a root, from their solution folders
 CREATE OR REPLACE MACRO vault_run_keys(root, branch_glob, experdef_glob) AS TABLE
@@ -123,7 +123,7 @@ CREATE OR REPLACE MACRO vault_errstats
         FROM vault_equations_long(root, vault_globs(root, branch_glob, experdef_glob, economies, 'errstats/errstats.parquet'))
     ),
     (root, branch_glob, experdef_glob, economy_regex, economy_names) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, UNNEST(regexp_extract(k.economy, economy_regex, economy_names)), variable, stat, value
+        SELECT k.branch, k.experdef, k.economy, UNNEST(regexp_extract(k.economy, economy_regex, economy_names)), equation, stat, value
         FROM vault_equations_long(root, vault_globs(root, branch_glob, experdef_glob, ['*'], 'errstats/errstats.parquet'))
     );
 
@@ -133,7 +133,7 @@ CREATE OR REPLACE MACRO vault_params
         FROM vault_parameters_long(root, vault_globs(root, branch_glob, experdef_glob, economies, 'params/params.parquet'))
     ),
     (root, branch_glob, experdef_glob, economy_regex, economy_names) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, UNNEST(regexp_extract(k.economy, economy_regex, economy_names)), variable AS parameter, value
+        SELECT k.branch, k.experdef, k.economy, UNNEST(regexp_extract(k.economy, economy_regex, economy_names)), parameter, value
         FROM vault_parameters_long(root, vault_globs(root, branch_glob, experdef_glob, ['*'], 'params/params.parquet'))
     );
 

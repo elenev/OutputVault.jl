@@ -3,13 +3,15 @@
         with_tempdir() do root
             cfg = make_cfg(root)
 
+            # default: the path only, nothing created
             p = OutputVault.output_path(cfg, "mybranch")
-            @test isdir(p)
             @test p == joinpath(root, "mybranch")
+            @test !isdir(p)
 
-            # idempotent
-            p2 = OutputVault.output_path(cfg, "mybranch")
-            @test p2 == p
+            # create=true creates it; idempotent
+            @test OutputVault.output_path(cfg, "mybranch"; create=true) == p
+            @test isdir(p)
+            @test OutputVault.output_path(cfg, "mybranch"; create=true) == p
         end
     end
 
@@ -18,8 +20,10 @@
             cfg = make_cfg(root)
             with_config(cfg) do
                 p = output_path("wrapbranch")
-                @test isdir(p)
                 @test p == joinpath(root, "wrapbranch")
+                @test !isdir(p)
+                @test output_path("wrapbranch"; create=true) == p
+                @test isdir(p)
             end
         end
     end
@@ -29,28 +33,15 @@
             cfg = make_cfg(root)
             rf  = RunHandle("usa"; branch="main", experdef="base")
 
-            # create=true creates and returns the folder
-            ef = OutputVault.economy_folder(cfg, rf; create=true)
-            @test isdir(ef)
-            @test ef == joinpath(root, "main", "res-base-usa")
+            # missing folder errors with its path and creates nothing
+            err = try OutputVault.economy_folder(cfg, rf); nothing catch e; e end
+            @test err isa ErrorException
+            @test occursin("res-base-usa", err.msg)
+            @test !isdir(joinpath(root, "main"))
 
-            # path ends with res-<experdef>-<economy>
-            @test endswith(ef, "res-base-usa")
-
-            # create=false on existing folder is fine
-            ef2 = OutputVault.economy_folder(cfg, rf; create=false)
-            @test ef2 == ef
-
-            # create=false on missing folder errors
-            rf_missing = RunHandle("eu"; branch="main", experdef="base")
-            @test_throws ErrorException OutputVault.economy_folder(cfg, rf_missing; create=false)
-
-            # error message contains the path
-            try
-                OutputVault.economy_folder(cfg, rf_missing; create=false)
-            catch e
-                @test occursin("res-base-eu", e.msg)
-            end
+            # existing folder is returned
+            mkpath(joinpath(root, "main", "res-base-usa"))
+            @test OutputVault.economy_folder(cfg, rf) == joinpath(root, "main", "res-base-usa")
         end
     end
 
@@ -58,10 +49,9 @@
         with_tempdir() do root
             cfg = make_cfg(root)
             rf  = RunHandle("usa"; branch="wrap", experdef="e")
+            mkpath(joinpath(root, "wrap", "res-e-usa"))
             with_config(cfg) do
-                ef = OutputVault.economy_folder(rf; create=true)
-                @test isdir(ef)
-                @test ef == joinpath(root, "wrap", "res-e-usa")
+                @test OutputVault.economy_folder(rf) == joinpath(root, "wrap", "res-e-usa")
             end
         end
     end

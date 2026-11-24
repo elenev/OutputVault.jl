@@ -3,8 +3,13 @@ using OutputVault
 # the extensions' packages, so that their methods are loaded when the docs are built
 using Parquet2, DuckDB, Tables, StaticArrays, StructArrays, TransitionFunctionIteration
 
+# the walkthrough pages run their code in a throwaway git repository (see walkthroughs.jl)
+include("walkthroughs.jl")
+const WORKDIR = walkthrough_repo()
+
 makedocs(
     sitename = "OutputVault.jl",
+    workdir = WORKDIR,
     modules = [OutputVault],
     pages = [
         "Home" => "index.md",

@@ -19,60 +19,64 @@ end
 get_results_folders(economies; kwargs...) =
     get_results_folders(global_config(), economies; kwargs...)
 
-function _rf_key(rf::RunHandle, format::Symbol)
-    raw = if format === :economy;                     rf.economy
-          elseif format === :experdef;                rf.experdef
-          elseif format === :branch;                  rf.branch
-          elseif format === :experdef_economy;        rf.experdef * "_" * rf.economy
-          elseif format === :branch_economy;          rf.branch   * "_" * rf.economy
-          elseif format === :branch_experdef;         rf.branch   * "_" * rf.experdef
-          elseif format === :branch_experdef_economy; rf.branch   * "_" * rf.experdef * "_" * rf.economy
-          else throw(ArgumentError("Unknown key_format :$format"))
-          end
-    Symbol(replace(raw, r"[^a-zA-Z0-9_]" => "_"))
+## Run keys: the names that identify runs in a NamedTuple of results
+
+const RUN_FIELDS = (:branch, :experdef, :economy)
+
+# the fields of a run key: one of RUN_FIELDS or a tuple of them
+function _key_fields(key)
+    fields = key isa Symbol ? (key,) : Tuple(key)
+    (isempty(fields) || !all(f -> f isa Symbol && f in RUN_FIELDS, fields) || !allunique(fields)) &&
+        throw(ArgumentError("key must be one of $RUN_FIELDS or a tuple of distinct ones, got $(repr(key))"))
+    return fields
 end
 
-function _auto_key_format(rfs::Vector{RunHandle})
-    for fmt in (:economy, :experdef_economy, :branch_experdef_economy)
-        allunique(_rf_key(rf, fmt) for rf in rfs) && return fmt
+# a name as a Symbol that can be typed as a NamedTuple field: other characters become '_'
+_key_name(x) = Symbol(replace(string(x), r"[^A-Za-z0-9_]" => "_"))
+
+# the key of a run (branch, experdef, economy): its `key` fields joined with "__"
+_run_key(run::NamedTuple, fields) = _key_name(join((getproperty(run, f) for f in fields), "__"))
+
+# the keys of `runs` (NamedTuples with fields branch, experdef, economy); distinct runs with the
+# same key are an error that lists them
+function run_keys(runs::AbstractVector, key)
+    fields = _key_fields(key)
+    keys = [_run_key(r, fields) for r in runs]
+    if !allunique(keys)
+        clashes = join(("  $k: " * join(("$(r.branch)/res-$(r.experdef)-$(r.economy)" for (r, k2) in zip(runs, keys) if k2 == k), ", ")
+                        for k in unique(k for k in keys if count(==(k), keys) > 1)), "\n")
+        hint = length(fields) == length(RUN_FIELDS) ?
+               "Their names differ only in characters that become '_'; rename one of them." :
+               "Narrow the runs (branch, experdef) or use a longer key, such as $(repr(RUN_FIELDS))."
+        throw(ArgumentError("key = $(repr(key)) gives the same name to different runs:\n$clashes\n$hint"))
     end
-    return :branch_experdef_economy
+    return keys
 end
 
 """
-    find_matching_results(cfg::AbstractConfig, wildcard="\$(current_branch())/res-*"; key_format=:auto)
-    find_matching_results(wildcard=...; kwargs...)
+    find_matching_results(cfg::AbstractConfig, wildcard = "\$(current_branch())/res-*"; key = (:branch, :experdef, :economy))
+    find_matching_results(wildcard = ...; kwargs...)
 
-Glob the output root for folders matching `wildcard`, parse their names as
-`res-{experdef}-{economy}`, and return a `NamedTuple` of `RunHandle`s.
+The saved runs whose folders match `wildcard`, a glob relative to the output root, as a `NamedTuple`
+of `RunHandle`s. Folders whose names are not of the form `res-<experdef>-<economy>` are skipped.
 
-# Keyword arguments
-- `key_format`: `:auto` (default), `:economy`, `:experdef_economy`, or
-  `:branch_experdef_economy`. `:auto` selects the shortest format that yields unique keys.
-
-Throws `ArgumentError` if the chosen format produces duplicate keys.
+Each run is named by `key`: the run's `branch`, `experdef` and `economy` joined with `__`, or only
+the fields you pass (`key = :economy`, `key = (:experdef, :economy)`). Characters other than letters,
+digits and `_` become `_`, so that `feature/x` is `feature_x`. If two runs get the same name, it is an
+`ArgumentError` that lists them.
 """
 function find_matching_results(cfg::AbstractConfig, wildcard="$(current_branch())/res-*";
-        key_format::Symbol=:auto)
-    fullpaths = filter(isdir, glob(wildcard, output_root(cfg)))
-
-    function _parse_path(fullpath)
-        parentpath, econ_folder = splitdir(fullpath)
-        m = match(r"res-(?<experdef>[^-]+)-(?<economy>.+)$", econ_folder)
-        isnothing(m) && return nothing
-        return RunHandle(m[:economy]; experdef=m[:experdef], branch=basename(parentpath))
+        key = RUN_FIELDS)
+    root = output_root(cfg)
+    runs = RunHandle[]
+    for path in sort(filter(isdir, glob(wildcard, root)))
+        m = match(r"^res-(?<experdef>[^-]+)-(?<economy>.+)$", basename(path))
+        isnothing(m) && continue
+        branch = replace(relpath(dirname(path), root), '\\' => '/')
+        push!(runs, RunHandle(m[:economy]; experdef = m[:experdef], branch))
     end
-
-    rfs = [p for p in (_parse_path(fp) for fp in fullpaths) if !isnothing(p)]
-    isempty(rfs) && return NamedTuple()
-
-    fmt  = key_format === :auto ? _auto_key_format(rfs) : key_format
-    keys = [_rf_key(rf, fmt) for rf in rfs]
-    if !allunique(keys)
-        dups = unique(k for k in keys if count(==(k), keys) > 1)
-        throw(ArgumentError("key_format=:$key_format produces duplicate keys: $dups"))
-    end
-    return NamedTuple{Tuple(keys)}(Tuple(rfs))
+    names = run_keys([(; r.branch, r.experdef, r.economy) for r in runs], key)
+    return NamedTuple{Tuple(names)}(Tuple(runs))
 end
 
 find_matching_results(wildcard="$(current_branch())/res-*"; kwargs...) =

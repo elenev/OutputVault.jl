@@ -1,71 +1,29 @@
 @testset "discovery" begin
 
-    # ── _rf_key ──────────────────────────────────────────────────────────────
+    # ── run keys ─────────────────────────────────────────────────────────────
 
-    @testset "_rf_key formats" begin
-        rf = RunHandle("usa"; branch="main", experdef="v1")
-
-        @test OutputVault._rf_key(rf, :economy)               == :usa
-        @test OutputVault._rf_key(rf, :experdef)              == :v1
-        @test OutputVault._rf_key(rf, :branch)                == :main
-        @test OutputVault._rf_key(rf, :experdef_economy)      == :v1_usa
-        @test OutputVault._rf_key(rf, :branch_economy)        == :main_usa
-        @test OutputVault._rf_key(rf, :branch_experdef)       == :main_v1
-        @test OutputVault._rf_key(rf, :branch_experdef_economy) == :main_v1_usa
-    end
-
-    @testset "_rf_key sanitizes special characters" begin
-        rf = RunHandle("us-east"; branch="feat/my-thing", experdef="v1.0")
-
-        @test OutputVault._rf_key(rf, :economy)  == :us_east
-        @test OutputVault._rf_key(rf, :branch)   == :feat_my_thing
-        @test OutputVault._rf_key(rf, :experdef) == :v1_0
-
-        # two distinct strings that sanitize to the same symbol
-        rf_a = RunHandle("x"; branch="feat/abc", experdef="e")
-        rf_b = RunHandle("x"; branch="feat-abc", experdef="e")
-        @test OutputVault._rf_key(rf_a, :branch) == OutputVault._rf_key(rf_b, :branch)
-    end
-
-    @testset "_rf_key unknown format throws" begin
-        rf = RunHandle("usa"; branch="main", experdef="v1")
-        @test_throws ArgumentError OutputVault._rf_key(rf, :bogus)
-    end
-
-    # ── _auto_key_format ──────────────────────────────────────────────────────
-
-    @testset "_auto_key_format" begin
-        mkrf(eco; branch="main", exp="v1") = RunHandle(eco; branch=branch, experdef=exp)
-
-        # unique economies → :economy
-        @test OutputVault._auto_key_format([mkrf("usa"), mkrf("eu")]) == :economy
-
-        # single handle → :economy
-        @test OutputVault._auto_key_format([mkrf("usa")]) == :economy
-
-        # same economy, different experdef → :experdef_economy
-        @test OutputVault._auto_key_format([
-            mkrf("usa"; exp="v1"), mkrf("usa"; exp="v2")
-        ]) == :experdef_economy
-
-        # same economy + experdef, different branches → :branch_experdef_economy
-        @test OutputVault._auto_key_format([
-            mkrf("usa"; branch="main", exp="v1"),
-            mkrf("usa"; branch="dev",  exp="v1"),
-        ]) == :branch_experdef_economy
-
-        # branches that sanitize to the same symbol but unique experdef_economy →
-        # :economy would collide, so escalates to :experdef_economy
-        @test OutputVault._auto_key_format([
-            RunHandle("usa"; branch="feat/x", experdef="v1"),
-            RunHandle("eu";  branch="feat-x", experdef="v1"),
-        ]) == :economy  # distinct economies, so :economy is unique
-
-        # sanitization makes all three formats collide → fallback return after loop exits
-        @test OutputVault._auto_key_format([
-            RunHandle("usa"; branch="main/x", experdef="v1"),
-            RunHandle("usa"; branch="main-x", experdef="v1"),
-        ]) == :branch_experdef_economy
+    @testset "run keys" begin
+        run(b, x, e) = (branch = b, experdef = x, economy = e)
+        runs = [run("main", "v1", "usa"), run("main", "v1", "eu")]
+        @test OutputVault.run_keys(runs, OutputVault.RUN_FIELDS) == [:main__v1__usa, :main__v1__eu]
+        @test OutputVault.run_keys(runs, :economy) == [:usa, :eu]
+        @test OutputVault.run_keys(runs, (:experdef, :economy)) == [:v1__usa, :v1__eu]
+        @test OutputVault.run_keys(runs, (:economy, :branch)) == [:usa__main, :eu__main]   # in the order given
+        # characters other than letters, digits and _ become _
+        @test OutputVault.run_keys([run("feat/my-thing", "v1", "us-east")], OutputVault.RUN_FIELDS) == [:feat_my_thing__v1__us_east]
+        # bad keys
+        for bad in (:bogus, (), (:economy, :economy), ("economy",))
+            @test_throws ArgumentError OutputVault.run_keys(runs, bad)
+        end
+        # a clash names the runs and suggests a longer key
+        clash = [run("main", "v1", "usa"), run("dev", "v1", "usa")]
+        err = try OutputVault.run_keys(clash, :economy); nothing catch e; e end
+        @test err isa ArgumentError && occursin("main/res-v1-usa", err.msg) && occursin("dev/res-v1-usa", err.msg) &&
+              occursin("longer key", err.msg)
+        @test OutputVault.run_keys(clash, (:branch, :economy)) == [:main__usa, :dev__usa]
+        # with the full key, only the replaced characters can clash
+        err = try OutputVault.run_keys([run("feat/x", "v1", "usa"), run("feat-x", "v1", "usa")], OutputVault.RUN_FIELDS); nothing catch e; e end
+        @test err isa ArgumentError && occursin("rename", err.msg)
     end
 
     # ── get_results_folders ───────────────────────────────────────────────────
@@ -127,77 +85,55 @@
                 r = find_matching_results(cfg, "main/res-*")
                 @test length(r) == 3
                 @test all(v -> v isa RunHandle, values(r))
-                @test all(k -> k isa Symbol, keys(r))
+                @test keys(r) == (:main__alt__usa, :main__base__eu, :main__base__usa)   # the full key by default
             end
 
-            @testset "auto key selects experdef_economy for duplicate economy" begin
-                # main has base-usa, base-eu, alt-usa → :economy has duplicate :usa
-                r = find_matching_results(cfg, "main/res-*")
-                @test haskey(r, :base_usa)
-                @test haskey(r, :base_eu)
-                @test haskey(r, :alt_usa)
+            @testset "a shorter key" begin
+                r = find_matching_results(cfg, "main/res-*"; key = (:experdef, :economy))
+                @test keys(r) == (:alt__usa, :base__eu, :base__usa)
+                r = find_matching_results(cfg, "main/res-base-*"; key = :economy)
+                @test r.usa.branch == "main" && r.usa.experdef == "base" && r.usa.economy == "usa"
+                @test r.eu.economy == "eu"
             end
 
-            @testset "explicit key_format" begin
-                r = find_matching_results(cfg, "main/res-*"; key_format=:branch_experdef_economy)
-                @test haskey(r, :main_base_usa)
-                @test haskey(r, :main_alt_usa)
+            @testset "a key that clashes throws" begin
+                @test_throws ArgumentError find_matching_results(cfg, "main/res-*"; key = :economy)    # usa twice
+                @test_throws ArgumentError find_matching_results(cfg, "*/res-base-usa"; key = :economy) # main and feat
+                @test keys(find_matching_results(cfg, "*/res-base-usa"; key = (:branch, :economy))) == (:feat__usa, :main__usa)
             end
 
-            @testset "duplicate key throws" begin
-                # :economy has duplicate :usa → should throw
-                @test_throws ArgumentError find_matching_results(cfg, "main/res-*"; key_format=:economy)
+            @testset "nested branch keeps its full name" begin
+                mkpath(joinpath(root, "feature", "x", "res-base-usa"))
+                r = find_matching_results(cfg, "feature/x/res-*")
+                @test only(values(r)).branch == "feature/x"
+                @test keys(r) == (:feature_x__base__usa,)
             end
 
-            @testset "cross-branch wildcard" begin
-                r = find_matching_results(cfg, "*/res-base-usa")
-                @test length(r) == 2
-            end
-
-            @testset "parsed fields" begin
-                r = find_matching_results(cfg, "main/res-base-*"; key_format=:economy)
-                @test r.usa.branch   == "main"
-                @test r.usa.experdef == "base"
-                @test r.usa.economy  == "usa"
-                @test r.eu.economy   == "eu"
-            end
-
-            @testset "malformed folder name is silently skipped" begin
+            @testset "malformed folder name is skipped" begin
                 mkpath(joinpath(root, "main", "res-nohyphen"))
-                r = find_matching_results(cfg, "main/res-*")
-                # should still have the 3 valid results, not the malformed one
-                @test all(k -> k != :nohyphen, keys(r))
+                @test length(find_matching_results(cfg, "main/res-*")) == 3
             end
 
             @testset "non-directory is excluded" begin
                 write(joinpath(root, "main", "res-base-fakefile"), "")
-                r = find_matching_results(cfg, "main/res-*")
-                @test !haskey(r, :fakefile)
-                @test !haskey(r, :base_fakefile)
+                @test !haskey(find_matching_results(cfg, "main/res-*"), :main__base__fakefile)
             end
 
             @testset "economy with hyphen parses correctly" begin
                 mkpath(joinpath(root, "main", "res-base-us-east"))
-                r = find_matching_results(cfg, "main/res-base-us-east"; key_format=:economy)
-                @test haskey(r, :us_east)
-                @test r.us_east.economy  == "us-east"
-                @test r.us_east.experdef == "base"
+                r = find_matching_results(cfg, "main/res-base-us-east"; key = :economy)
+                @test r.us_east.economy == "us-east" && r.us_east.experdef == "base"
             end
 
-            @testset "experdef with hyphen — known limitation" begin
-                # res-my-v2-usa: regex captures experdef="my", economy="v2-usa"
-                # because experdef capture is [^-]+ (no hyphens)
+            @testset "experdef with hyphen: split at the first hyphen" begin
                 mkpath(joinpath(root, "main", "res-my-v2-usa"))
-                r = find_matching_results(cfg, "main/res-my-v2-usa"; key_format=:experdef_economy)
-                k = only(keys(r))
-                rf = r[k]
-                @test rf.experdef == "my"
-                @test rf.economy  == "v2-usa"
+                rf = only(values(find_matching_results(cfg, "main/res-my-v2-usa")))
+                @test rf.experdef == "my" && rf.economy == "v2-usa"
             end
 
             @testset "global config wrapper" begin
                 with_config(cfg) do
-                    r = find_matching_results("main/res-base-*"; key_format=:economy)
+                    r = find_matching_results("main/res-base-*"; key = :economy)
                     @test haskey(r, :usa)
                 end
             end
