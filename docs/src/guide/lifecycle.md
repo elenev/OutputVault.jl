@@ -6,7 +6,8 @@ runs. The model is the neoclassical growth model of TransitionFunctionIteration'
 
 The code runs in two Julia processes. Section 1 is one script. Sections 2 to 5 are a second script,
 run in a new process, each section continuing where the previous one stopped. Both scripts are run
-from the same folder, which holds `ngm.jl` (below) and is inside a git repository.
+from the same folder, which holds `ngm.jl` (below) and is inside a git repository. The output under
+each block is what the code printed when these docs were built.
 
 ## Before you start
 
@@ -43,7 +44,6 @@ from the same folder, which holds `ngm.jl` (below) and is inside a git repositor
 Save this as `ngm.jl`. Both scripts include it, because a restored solution needs its model *type* in
 the new process: the model's parameters are in the file, its code is not.
 
-<!-- doctest: file ngm.jl -->
 ```julia
 using TransitionFunctionIteration, StaticArrays
 import TransitionFunctionIteration: Exogenv, calc_eqm, define_endog_grids, steadystate,
@@ -94,12 +94,11 @@ end
 
 The first script:
 
-<!-- doctest: process 1 -->
-```julia
+```@example lifecycle1
 using OutputVault, Parquet2, TransitionFunctionIteration
 include("ngm.jl")
 
-root = "/path/to/outputs"
+root = abspath("../outputs")       # your output folder
 set_config!(Config(
     output_root  = root,
     table_format = OutputVault.Formats.ParquetFormat(),
@@ -128,12 +127,11 @@ of the model) and must not contain `-`. The `economy` names the variant.
 Start a new Julia session (a new day, or another machine with the output folder) and load the
 *portable* copy of the solution. This starts the second script:
 
-<!-- doctest: process 2 -->
-```julia
+```@example lifecycle2
 using OutputVault, Parquet2, TransitionFunctionIteration
 include("ngm.jl")                                   # the model type must exist in this process
 
-root = "/path/to/outputs"
+root = abspath("../outputs")       # your output folder
 set_config!(Config(output_root  = root,
                    table_format = OutputVault.Formats.ParquetFormat()))
 rf = RunHandle("base"; experdef = "demo")
@@ -165,8 +163,7 @@ after the solve.
 
 ## 3. Warm-start a nearby calibration
 
-<!-- doctest: process 2 -->
-```julia
+```@example lifecycle2
 mdl2 = update_model(obj.model; ρ = 0.8)
 obj2, stv2 = main_setup(mdl2, obj)                  # starts from the reloaded solution
 main_execute!(obj2; maxiter = 1000, logging = COMPLETE)
@@ -182,8 +179,7 @@ which comes up again in [A result that was never saved](@ref).
 
 ## 4. Add results computed later
 
-<!-- doctest: process 2 -->
-```julia
+```@example lifecycle2
 save_result(rf,  (; irf = simulate_irf(obj, simseries)))
 save_result(rf2, (; irf = simulate_irf(obj2, simseries2)))
 ```
@@ -196,8 +192,7 @@ same way. Such a save needs the run to exist already; for a run that was never s
 
 Compare the runs through TFI's moments (see its guide on moments). First directly from the run folders:
 
-<!-- doctest: process 2 -->
-```julia
+```@example lifecycle2
 using DuckDB, Tables
 using TransitionFunctionIteration.Transformations: DiffPct, DiffLevel
 
@@ -218,8 +213,7 @@ folder names.
 
 The same comparison through DuckDB, which reads only the files of the runs you name:
 
-<!-- doctest: process 2 -->
-```julia
+```@example lifecycle2
 table = assemble_moments(root, moments; branch = rf.branch, experdef = "demo")
 economies = split_by_economy(table; key = :economy, order = [:base, :lowrho])
 compare_economies(moments, economies)
@@ -234,13 +228,8 @@ the same queries from Python.
 
 The `lowrho` run saved no parameters. Asking for one is an error that names the entry, never a zero:
 
-<!-- doctest: process 2, throws KeyError -->
-```julia
+```@repl lifecycle2
 getmoment(economies.lowrho, ParameterMoment(:β))
-```
-
-```
-KeyError: key "saved results have no entry (kind = :parameter, group = :parameters, variable = :β, stat = :value, period = 0)" not found
 ```
 
 The same holds for a statistic, an IRF or a whole run that is missing: it shows up as absent.

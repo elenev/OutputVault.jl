@@ -4,15 +4,15 @@ This page needs only OutputVault. It saves, extends, loads and replaces a run ma
 values. A second, optional part stores a type of your own as a Parquet table and queries it with
 DuckDB. For the same steps with a real model, see [A Research Run, Start to Finish](@ref).
 
-Run the code from inside a git repository: a saved solution records the repository's commit.
+Run the code from inside a git repository: a saved solution records the repository's commit. The output under
+each block is what the code printed when these docs were built.
 
 ## Configure and name a run
 
-<!-- doctest: process 1 -->
-```julia
+```@example quickstart
 using OutputVault
 
-root = "/path/to/outputs"
+root = abspath("../outputs")       # your output folder
 set_config!(Config(output_root = root))
 
 rf = RunHandle("base"; experdef = "v1")       # branch: the current git branch
@@ -24,11 +24,10 @@ economy ([Runs and the Layout](@ref)).
 
 ## Save a solution
 
-<!-- doctest: process 1 -->
-```julia
+```@example quickstart
 save_result(rf, (; obj   = (α = 0.33, β = 0.96),      # the "solution": any value
                    stats = (K = 3.5, C = 1.2)))
-readdir(OutputVault.economy_folder(rf))              # ["solution", "stats"]
+readdir(OutputVault.economy_folder(rf))
 ```
 
 `save_result` saves the properties of its argument whose names the layout knows (`obj`, `stats` and
@@ -42,10 +41,9 @@ Parquet tables instead, which other languages read ([TransitionFunctionIteration
 
 ## Add a result later
 
-<!-- doctest: process 1 -->
-```julia
+```@example quickstart
 save_result(rf, (; irf = (K = [0.0, 0.01],)))
-readdir(OutputVault.economy_folder(rf))              # ["irf", "solution", "stats"]
+readdir(OutputVault.economy_folder(rf))
 ```
 
 A save without a solution adds to the run and leaves the solution alone. Saving an object again
@@ -53,20 +51,21 @@ replaces it.
 
 ## Load
 
-<!-- doctest: process 1 -->
-```julia
-load(rf, :stats).stats                               # (K = 3.5, C = 1.2)
-load(rf, :solution).obj                              # (α = 0.33, β = 0.96)
+```@example quickstart
+load(rf, :stats).stats
+```
+
+```@example quickstart
+load(rf, :solution).obj
 ```
 
 `load` takes a component (a folder of the run) and returns a `NamedTuple` of the objects saved in it.
 
 ## Saving a solution replaces the run
 
-<!-- doctest: process 1 -->
-```julia
+```@example quickstart
 save_result(rf, (; obj = (α = 0.33, β = 0.95)))
-readdir(OutputVault.economy_folder(rf))              # ["solution"]
+readdir(OutputVault.economy_folder(rf))
 ```
 
 A save that includes `obj` or `stv` writes a new run folder holding only what it contains, then
@@ -83,8 +82,7 @@ results are, and the return value is the temporary folder holding the new ones
 To store a type as a table, so that DuckDB, Python or R can read it, tell OutputVault how. Here is a
 table of summary statistics, with one row per variable:
 
-<!-- doctest: process 1 -->
-```julia
+```@example quickstart
 using Parquet2, Tables
 
 struct Summary
@@ -105,6 +103,7 @@ OutputVault.write_object(cfg::OutputVault.AbstractConfig, dir, name, s::Summary;
 OutputVault.read_kind(::Val{Symbol("Demo.Summary")}, source, path, fmt) =
     Summary(string.(Tables.getcolumn(source, :variable)),
             collect(Float64, Tables.getcolumn(source, :mean)), collect(Float64, Tables.getcolumn(source, :std)))
+nothing # hide
 ```
 
 - `storage_kind` is a name recorded in the file. When the file is loaded, it selects the reader.
@@ -117,27 +116,28 @@ like any other value. [Writing an Extension](@ref) has the details.
 
 Tables need a table format in the configuration. Then save a new solution with the table:
 
-<!-- doctest: process 1 -->
-```julia
+```@example quickstart
 set_config!(Config(output_root = root, table_format = OutputVault.Formats.ParquetFormat()))
 
 save_result(rf, (; obj   = (α = 0.33, β = 0.95),
                    stats = Summary(["K", "C"], [3.4, 1.19], [0.4, 0.1])))
-load(rf, :stats).stats.mean                          # [3.4, 1.19]
+load(rf, :stats).stats.mean
 ```
 
 The table is the file `stats/stats.parquet`. DuckDB reads it in place, from Julia or any other
 language:
 
-<!-- doctest: process 1 -->
-```julia
+```@example quickstart
 using DuckDB
 con = DBInterface.connect(DuckDB.DB)
 foreach(s -> DBInterface.execute(con, s), duckdb_statements())     # load OutputVault's SQL macros
-DBInterface.execute(con, "SELECT economy, variable, stat, value FROM vault_stats('$root') ORDER BY variable, stat")
+Tables.columntable(DBInterface.execute(con, """
+    SELECT branch, experdef, economy, variable, stat, value
+    FROM vault_stats('$root', experdef_glob := 'v1') ORDER BY variable, stat"""))
 ```
 
-`vault_stats` returns the `stats` tables of all runs under the root in long form, one row per number.
-It reads Parquet tables with a `variable` column and one column per statistic, which is how
-TransitionFunctionIteration stores its moments and how `Summary` is stored here
+`vault_stats` returns the `stats` tables of the runs under the root in long form, one row per number;
+`experdef_glob := 'v1'` limits it to the runs of experiment `v1`, and without it every run under the
+root is read. It reads Parquet tables with a `variable` column and one column per statistic, which is
+how TransitionFunctionIteration stores its moments and how `Summary` is stored here
 ([Querying with DuckDB](@ref)).
