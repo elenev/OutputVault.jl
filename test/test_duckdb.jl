@@ -63,8 +63,27 @@ using DuckDB
                 ORDER BY economy")
         @test keys(sp) == (:branch, :experdef, :economy, :model, :scheme)
         @test sp.model == ["arm", "frm"] && sp.scheme == ["", "init-a"]
-        sps = q("SELECT * FROM vault_stats('$root', '**', '*', '^([^_]+)(?:_(.+))?\$', ['model', 'scheme']) LIMIT 1")
-        @test keys(sps) == (:branch, :experdef, :economy, :model, :scheme, :sample, :variable, :stat, :value)
+        # every macro with the economy split: the split columns after economy, then the macro's own columns
+        split_args = "'**', '*', '^([^_]+)(?:_(.+))?\$', ['model', 'scheme']"
+        own = (vault_stats = (:sample, :variable, :stat, :value), vault_errstats = (:equation, :stat, :value),
+               vault_params = (:parameter, :value), vault_irf = (:shock, :stat, :period, :variable, :value),
+               vault_runs = ())
+        for (macro_, cols) in pairs(own)
+            plain = q("SELECT * FROM $macro_('$root')")
+            split = q("SELECT * FROM $macro_('$root', $split_args)")
+            @test keys(split) == (:branch, :experdef, :economy, :model, :scheme, cols...)
+            @test keys(plain) == (:branch, :experdef, :economy, cols...)
+            @test length(split.economy) == length(plain.economy)
+            @test Set(zip(split.economy, split.model)) ⊆ Set([("arm", "arm"), ("frm_init-a", "frm")])
+        end
+        sims = q("SELECT * FROM vault_simulation('$root', $split_args)")
+        @test keys(sims)[1:5] == (:branch, :experdef, :economy, :model, :scheme) && length(sims.economy) == length(simseries.data)
+        # the named-argument forms, one at a time
+        @test only(unique(q("SELECT economy FROM vault_errstats('$root', economies := ['arm'])").economy)) == "arm"
+        @test only(unique(q("SELECT economy FROM vault_irf('$root', branch_glob := 'feat/*')").economy)) == "frm_init-a"
+        @test only(unique(q("SELECT economy FROM vault_params('$root', experdef_glob := 'base')").economy)) == "frm_init-a"
+        @test only(unique(q("SELECT economy FROM vault_simulation('$root', economies := ['frm*'])").economy)) == "frm_init-a"
+        @test q("SELECT economy FROM vault_runs('$root', branch_glob := 'feat/*', experdef_glob := 'base')").economy == ["frm_init-a"]
     end
 
     # moments read from the saved runs: the same table as from the results in memory
