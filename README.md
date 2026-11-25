@@ -92,14 +92,6 @@ WHERE sample = 'uncond' AND stat = 'mean';
 > diffs, not those of the output root or the model. Start Julia from the model's repository or pass
 > `branch = ...`.
 
-Then, from any language with DuckDB (the macros are `sql/outputvault.sql`):
-
-```sql
-SELECT economy, variable, value
-FROM vault_stats('/path/to/outputs', experdef_glob := 'v1')
-WHERE sample = 'uncond' AND stat = 'mean';
-```
-
 ## Documentation
 
 A model-free quick start, a step-by-step lifecycle with a real model (solve and save, fresh-process
@@ -115,18 +107,19 @@ julia --project=docs docs/make.jl
 
 ```julia
 using Pkg
-Pkg.add(url = "git@github.com:elenev/OutputVault.jl.git")
+Pkg.add("OutputVault")
 ```
 
 Julia 1.12 or later. Add the packages of the extensions you use.
 
-## Status
+## File format versions
 
-Version 0.2.0, not yet released. The file layouts are versioned: a solution file records its schema
-version and the reader accepts only the current one. Components saved by OutputVault 0.1 (one
-`<component>.jld2` file each) still load.
+The file layouts are versioned: a solution file records its schema version and the reader accepts
+only the current one. Components saved by OutputVault 0.1 (one `<component>.jld2` file each) still
+load.
 
 ## Development
 
 `julia --project=. -e 'using Pkg; Pkg.test()'` runs the tests, which save and load every supported
-type through a temporary root and a throwaway git repository. `CLAUDE.md` has the maintainer notes.
+type through a temporary root and a throwaway git repository. They expect a checkout of
+TransitionFunctionIteration in the sibling folder `../TransitionFunctionIteration`.
