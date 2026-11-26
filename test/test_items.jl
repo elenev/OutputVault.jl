@@ -21,6 +21,7 @@ files_under(dir) = sort([relpath(joinpath(r, f), dir) for (r, _, fs) in walkdir(
             save_result_item(rf, "stats", (uncond = (variable = [:c, :k], mean = [0.7, 2.9]), note = "text", n = 3))
             save_result_item(rf, "irf/ss", (stats = (shock = [:tfp], value = [1.0]), extra = (; deep = Plain(2, Float64[]))))
             save_result_item(rf, "plain", Plain(3, [1.0, 2.0]))
+            save_result_item(rf, "greek", (α = 0.33, β = [1.0, 2.0]))     # a folder with non-ASCII names
             @test isfile(joinpath(dir, "stats", "uncond.parquet")) && isfile(joinpath(dir, "stats", "note.jld2"))
             @test isfile(joinpath(dir, "irf", "ss", "stats.parquet")) && isfile(joinpath(dir, "irf", "ss", "extra", "deep.jld2"))
             @test isfile(joinpath(dir, "plain.jld2"))
@@ -35,6 +36,10 @@ files_under(dir) = sort([relpath(joinpath(r, f), dir) for (r, _, fs) in walkdir(
             @test load_result_item(rf, "stats/uncond").mean == [0.7, 2.9]
             @test load_result_item(rf, "plain")["value"] == Plain(3, [1.0, 2.0])
             @test load_result_item(rf, "plain", Plain) == Plain(3, [1.0, 2.0])   # read_jld2's default
+            @test load_result_item(rf, "greek").α["value"] == 0.33
+            move_result_item(rf, "greek/α", "greek/γ")
+            @test keys(load_result_item(rf, "greek")) == (:β, :γ)
+            @test "greek/γ" in list_run(rf).items.path
             @test load_result_item(rf, "irf").ss.extra.deep["value"] == Plain(2, Float64[])
             sol = load_result_item(rf, "solution")
             @test keys(sol) == (:obj, :params) && sol.params.p == [:a, :b]

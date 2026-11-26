@@ -151,7 +151,7 @@ function load_result_item(rf::RunHandle, path, T::Type; context = nothing)
 end
 
 # reading solution/ skips the native copy of runs saved with OutputVault 0.3
-solution_skip(levels) = levels == [SOLUTION] ? (LEGACY_NATIVE_FILE,) : ()
+solution_skip(levels) = levels == [SOLUTION] ? [LEGACY_NATIVE_FILE] : String[]
 
 function read_native(dir)
     path = joinpath(dir, NATIVE_FILE)
@@ -182,7 +182,7 @@ function move_result_item(rf::RunHandle, from, to)
         throw(ArgumentError("cannot move \"$from\" to \"$to\": an item is already at \"$to\""))
     end
     check_parents(dir, dst, string(to))
-    suffix = isdir(p) ? "" : basename(p)[length(src[end])+1:end]
+    suffix = isdir(p) ? "" : "." * file_extension(basename(p))
     target = joinpath(mkpath(joinpath(dir, dst[1:end-1]...)), dst[end] * suffix)
     mv(p, target)
     return target
@@ -247,7 +247,7 @@ function list_items!(items, dir, prefix)
             if !isnothing(kind)
                 push!(items.path, prefix * item_name(f))
                 push!(items.kind, kind === :jld2 ? :jld2 : :table)
-                push!(items.format, f[length(item_name(f))+2:end])
+                push!(items.format, file_extension(f))
             end
         end
     end

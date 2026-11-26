@@ -100,7 +100,10 @@ function file_kind(name)
 end
 
 # the item name of a file or folder name: before the first '.'
-item_name(name) = something(findfirst('.', name), lastindex(name) + 1) |> i -> name[1:i-1]
+item_name(name) = String(first(split(name, '.'; limit = 2)))
+
+# the extension of a file name: after the first '.' ("" if none)
+file_extension(name) = occursin('.', name) ? String(last(split(name, '.'; limit = 2))) : ""
 
 # the existing forms of the item at `stem` (an absolute path without extension): files
 # stem.jld2 and stem.<table ext>, and the folder stem/
@@ -210,8 +213,9 @@ function single_form(stem, path)
     return forms[1]
 end
 
-# the data of a file or folder: a StoredTable, a NamedTuple of the members' data, or a Dict
-function read_form(p; skip = ())
+# the data of a file or folder: a StoredTable, a NamedTuple of the members' data, or a Dict; `skip`
+# names files of the folder to leave out
+function read_form(p::String; skip::Vector{String} = String[])
     if isdir(p)
         return read_folder(p; skip)
     end
@@ -222,8 +226,9 @@ function read_form(p; skip = ())
     return Formats.read_table(kind, p)
 end
 
-# a folder as a NamedTuple of its items, in alphabetical order; other files are ignored
-function read_folder(dir; skip = ())
+# a folder as a NamedTuple of its items, in alphabetical order; other files are ignored. The
+# members' data are collected untyped, which keeps inference of the recursion cheap.
+function read_folder(dir::String; skip::Vector{String} = String[])
     names = String[]
     forms = String[]
     for f in sort(readdir(dir))
@@ -240,11 +245,15 @@ function read_folder(dir; skip = ())
             push!(forms, p)
         end
     end
-    return NamedTuple{Tuple(Symbol.(names))}(Tuple(read_form(p) for p in forms))
+    data = Any[]
+    for p in forms
+        push!(data, read_form(p))
+    end
+    return NamedTuple{Tuple(Symbol.(names))}(Tuple(data))
 end
 
 # the item at `stem` restored as a `T`: read_jld2 for a .jld2 file, from_storage otherwise
-function read_typed(stem, path, T, context; skip = ())
+function read_typed(stem, path, T, context; skip::Vector{String} = String[])
     p = single_form(stem, path)
     if !isdir(p) && file_kind(basename(p)) === :jld2
         return jldopen(io -> read_jld2(T, io; context), p, "r")
