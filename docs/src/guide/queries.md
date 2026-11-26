@@ -69,26 +69,26 @@ the configured table format are read; `.jld2` files are not queryable.
 
 ## SQL for other languages
 
-`sql/outputvault.sql` ([`OutputVault.sql_path`](@ref)) holds DuckDB macros over an output root for any
-language with DuckDB; [`vault_connection`](@ref) returns a Julia connection with them loaded:
+`sql/outputvault.sql` ([`OutputVault.sql_path`](@ref)) holds DuckDB macros that read a list of table
+files, for any language with DuckDB; [`vault_connection`](@ref) returns a Julia connection with them
+loaded:
 
 | Macro | Returns |
 |:--|:--|
-| `vault_runs(root, branch_glob := '*', experdef_glob := '*', variant_glob := '*')` | the runs: `branch, experdef, variant` |
-| `vault_objects(root, …, path_glob := '**')` | their items: `branch, experdef, variant, path, format, file` |
 | `vault_table_parquet(files)` | the tables of a list of Parquet files, with `__file` and `__row` |
 | `vault_metadata_parquet(files)` | their file-level metadata: `file, key, value` |
 | `vault_split_variant(variant, regex, names)` | the variant split into named parts by a regex |
 
-For example, in Python:
+The caller finds the files by the layout of [Runs and Storage](@ref). In Python, the statistics of
+all runs of experiment `v1`:
 
 ```python
-import duckdb
+import duckdb, pathlib
+root = pathlib.Path("/path/to/outputs")
+files = [str(f) for f in root.glob("**/res-v1-*/stats/*.parquet")]
 con = duckdb.connect()
 con.execute(open("/path/to/outputvault.sql").read())
-files = con.sql("SELECT file FROM vault_objects('/path/to/outputs', experdef_glob := 'v1', path_glob := 'stats') "
-                "WHERE format = 'parquet'").fetchall()
-con.sql(f"SELECT * FROM vault_table_parquet({[f for (f,) in files]})")
+con.sql(f"SELECT * FROM vault_table_parquet({files})")
 ```
 
 The variant follows no naming convention of OutputVault's; `vault_split_variant` applies the

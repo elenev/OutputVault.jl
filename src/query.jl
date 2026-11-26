@@ -31,8 +31,8 @@ end
 """
     vault_connection() -> DuckDB connection
 
-An in-memory DuckDB connection with OutputVault's macros loaded (`vault_runs`, `vault_objects`,
-`vault_table_parquet`, `vault_metadata_parquet`, `vault_split_variant`; see `sql/outputvault.sql`),
+An in-memory DuckDB connection with OutputVault's macros loaded
+(`vault_table_parquet`, `vault_metadata_parquet`, `vault_split_variant`; see `sql/outputvault.sql`),
 for querying in SQL. Close it with `DBInterface.close!`.
 """
 function vault_connection()

@@ -83,15 +83,6 @@ rowset(t) = collect(zip(values(t)...))
             con = vault_connection()
             try
                 q(sql) = Tables.columntable(DBI.execute(con, sql))
-                r = q("SELECT * FROM vault_runs('$root', branch_glob := '**')")
-                @test rowset(r) == [("feature/x", "v1", "base"), ("main", "v1", "alt"), ("main", "v1", "base"), ("main", "v2", "base")]
-                @test rowset(q("SELECT * FROM vault_runs('$root')")) == rowset(r)[2:end]
-                @test [(rf.branch, rf.experdef, rf.variant) for rf in find_runs(RunPattern(; branch = "**"))] == rowset(r)
-
-                o = q("SELECT branch, variant, path, format FROM vault_objects('$root', variant_glob := 'base', experdef_glob := 'v1')")
-                @test rowset(o) == [("main", "base", "irf/ss/stats", "parquet"), ("main", "base", "params/params", "parquet"),
-                                    ("main", "base", "solution/x", "jld2"), ("main", "base", "stats/boom", "parquet"),
-                                    ("main", "base", "stats/broken", "jld2"), ("main", "base", "stats/uncond", "parquet")]
                 f = joinpath(OutputVault.run_path(root, base), "stats", "uncond.parquet")
                 t = q("SELECT variable, mean, __row FROM vault_table_parquet(['$f'])")
                 @test rowset(t) == [("c", 0.71, 0), ("k", 2.9, 1)]
