@@ -132,4 +132,4 @@ s = load_result_item(rf, "summary", Summary)
 
 `Summary` is a table, so it is saved as one, with its metadata; `from_storage` turns the table read
 back into a `Summary`. A type that is not a table can define `to_storage` to say what to save
-instead, or `write_jld2` and `read_jld2` for its own layout inside a `.jld2` file ([Frontends](@ref)).
+instead, or `write_portable_jld2` and `read_portable_jld2` for its own layout inside a `.jld2` file ([Frontends](@ref)).

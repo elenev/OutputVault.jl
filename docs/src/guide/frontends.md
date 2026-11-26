@@ -14,7 +14,7 @@ For each of its types `T`, a frontend may define:
 - `from_storage(::Type{T}, data; context)`: rebuild a `T` from the data read back, a
   [`StoredTable`](@ref OutputVault.Formats.StoredTable) or a NamedTuple of the members' data.
   OutputVault calls it only with a type the caller supplied, never with one read from disk.
-- `write_jld2(io, x::T)` and `read_jld2(::Type{T}, io; context)`: a portable layout inside a `.jld2`
+- `write_portable_jld2(io, x::T)` and `read_portable_jld2(::Type{T}, io; context)`: a portable layout inside a `.jld2`
   file instead of the Julia object, for example plain arrays that h5py reads. `io` is the open JLD2
   file.
 
@@ -32,7 +32,7 @@ A frontend for an economy with parameters, a panel and settings with strings and
 
 ```julia
 using OutputVault, Tables, DataAPI
-import OutputVault: to_storage, from_storage, write_jld2, read_jld2
+import OutputVault: to_storage, from_storage, write_portable_jld2, read_portable_jld2
 
 struct Economy
     beta::Float64
@@ -54,11 +54,11 @@ struct Solution
     model::Symbol
     coefs::Vector{Float64}
 end
-function write_jld2(io, s::Solution)
+function write_portable_jld2(io, s::Solution)
     io["coefs"] = s.coefs
     io["model_name"] = string(s.model)
 end
-read_jld2(::Type{Solution}, io; context = nothing) = Solution(context, io["coefs"])
+read_portable_jld2(::Type{Solution}, io; context = nothing) = Solution(context, io["coefs"])
 
 save_solution(rf, (; obj = Solution(:dsge, [1.0, 2.0])))       # solution/obj.jld2, plain arrays
 save_result_item(rf, "economy", Economy(0.99, 2.0, "Beta", true))

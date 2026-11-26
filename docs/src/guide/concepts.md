@@ -49,7 +49,7 @@ OutputVault writes a value `v` at path `p` as follows.
    without a table format in the configuration is an error.
 3. Else, if `s` is a NamedTuple, it writes a folder `p/`, with each member `m` at `p/m` by these same
    rules, `to_storage` included.
-4. Otherwise it writes `p.jld2` with [`write_jld2`](@ref): the Julia object, unless the type's
+4. Otherwise it writes `p.jld2` with [`write_portable_jld2`](@ref): the Julia object, unless the type's
    package defines its own layout.
 
 Saving at a path first removes what is there, in every form (`p.<ext>`, `p.jld2`, `p/`), so saving
@@ -69,7 +69,7 @@ OutputVault reads data and never lets a file choose the code that reads it:
 
 Turning data into a package's types is driven by the type the caller passes:
 `load_result_item(rf, path, T)` calls `from_storage(T, data)` for a table or a folder and
-`read_jld2(T, io)` for a `.jld2` file ([Frontends](@ref)). `from_storage` sees only the item's own data,
+`read_portable_jld2(T, io)` for a `.jld2` file ([Frontends](@ref)). `from_storage` sees only the item's own data,
 so values that are only meaningful together belong in one item.
 
 ## Provenance

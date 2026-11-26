@@ -1,7 +1,7 @@
 # How values are written and read at a path: the storage hooks and the storage rules.
 #
 # A value at path p is, after to_storage: a table file p.<ext> (Tables.istable), a folder p/ (a
-# NamedTuple, member m at p/m by the same rules) or p.jld2 (anything else, through write_jld2).
+# NamedTuple, member m at p/m by the same rules) or p.jld2 (anything else, through write_portable_jld2).
 # Each item is written to a temporary sibling, whose name starts with '.', and then renamed into
 # place after the old item is removed. Readers skip names that start with '.'.
 
@@ -18,7 +18,7 @@ const LEGACY_NATIVE_FILE = "res.jld2"      # the native copy in runs saved with 
     to_storage(x)
 
 The value OutputVault writes for `x`: a Tables.jl table (one table file), a NamedTuple (a folder,
-one item per member; a NamedTuple of equal-length vectors is a table) or anything else (a `.jld2` file written by [`write_jld2`](@ref)). Default:
+one item per member; a NamedTuple of equal-length vectors is a table) or anything else (a `.jld2` file written by [`write_portable_jld2`](@ref)). Default:
 `x` itself. A package adds methods for its own types.
 """
 to_storage(x) = x
@@ -34,23 +34,26 @@ type the caller supplied. There is no generic method, so loading with a type tha
 function from_storage end
 
 """
-    write_jld2(io, x)
+    write_portable_jld2(io, x)
 
-Write `x` into the open JLD2 file `io`. Default: `io["value"] = x`, the Julia object. A package
-adds methods for a portable layout of its own types.
+Write `x` into the open JLD2 file `io` that holds a `.jld2` item. A package defines methods for its
+types to store a portable layout (plain arrays and strings that h5py, MATLAB or later Julia code can
+read without the package). Without a method for its type, `x` is stored as the Julia object,
+`io["value"] = x`.
 """
-function write_jld2(io, x)
+function write_portable_jld2(io, x)
     io["value"] = x
     return nothing
 end
 
 """
-    read_jld2(::Type{T}, io; context = nothing)
+    read_portable_jld2(::Type{T}, io; context = nothing)
 
-Read a `T` from the open JLD2 file `io`, as written by [`write_jld2`](@ref). Default:
-`io["value"]`. `context` is what the caller passed.
+Rebuild a `T` from the open JLD2 file `io`, as written by [`write_portable_jld2`](@ref).
+`context` is what the caller of [`load_result_item`](@ref) passed, for what the file does not store
+(TransitionFunctionIteration passes the model). Without a method for `T`: `io["value"]`.
 """
-read_jld2(::Type, io; context = nothing) = io["value"]
+read_portable_jld2(::Type, io; context = nothing) = io["value"]
 
 ## Paths
 
@@ -181,7 +184,7 @@ function write_item(dir, name, v, fmt, path)
             end
         else
             tmp, final = tmpstem * ".jld2", joinpath(dir, name * ".jld2")
-            jldopen(io -> write_jld2(io, s), tmp, "w")
+            jldopen(io -> write_portable_jld2(io, s), tmp, "w")
         end
         remove_item(joinpath(dir, name))
         mv(tmp, final)
@@ -252,11 +255,11 @@ function read_folder(dir::String; skip::Vector{String} = String[])
     return NamedTuple{Tuple(Symbol.(names))}(Tuple(data))
 end
 
-# the item at `stem` restored as a `T`: read_jld2 for a .jld2 file, from_storage otherwise
+# the item at `stem` restored as a `T`: read_portable_jld2 for a .jld2 file, from_storage otherwise
 function read_typed(stem, path, T, context; skip::Vector{String} = String[])
     p = single_form(stem, path)
     if !isdir(p) && file_kind(basename(p)) === :jld2
-        return jldopen(io -> read_jld2(T, io; context), p, "r")
+        return jldopen(io -> read_portable_jld2(T, io; context), p, "r")
     end
     return from_storage(T, read_form(p; skip); context)
 end

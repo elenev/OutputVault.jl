@@ -24,7 +24,7 @@ computed from that solution as items saved at paths of your choice.
 - Queries across runs with DuckDB, in Julia terms (`QueryShape`, `query_results`), reading only the
   files of the selected runs, and SQL macros for other languages (`sql/outputvault.sql`).
 - No model package built in. A frontend package says how its types are stored (`to_storage`,
-  `from_storage`, `write_jld2`, `read_jld2`); TransitionFunctionIteration is one, through its package
+  `from_storage`, `write_portable_jld2`, `read_portable_jld2`); TransitionFunctionIteration is one, through its package
   extension.
 
 ## Example

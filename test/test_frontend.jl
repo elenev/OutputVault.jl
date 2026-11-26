@@ -2,7 +2,7 @@
 module TinyFrontend
 
 using OutputVault, Tables, DataAPI
-import OutputVault: to_storage, from_storage, write_jld2, read_jld2
+import OutputVault: to_storage, from_storage, write_portable_jld2, read_portable_jld2
 
 # a panel: a table with a label kept in the file metadata
 struct Panel
@@ -38,11 +38,11 @@ struct Solution
     model::Symbol
     coefs::Vector{Float64}
 end
-function write_jld2(io, s::Solution)
+function write_portable_jld2(io, s::Solution)
     io["coefs"] = s.coefs
     io["model_name"] = string(s.model)
 end
-function read_jld2(::Type{Solution}, io; context = nothing)
+function read_portable_jld2(::Type{Solution}, io; context = nothing)
     if string(context) != io["model_name"]
         error("the solution was saved for $(io["model_name"])")
     end

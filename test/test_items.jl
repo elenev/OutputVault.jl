@@ -35,7 +35,7 @@ files_under(dir) = sort([relpath(joinpath(r, f), dir) for (r, _, fs) in walkdir(
             @test stats.note == Dict("value" => "text")
             @test Tables.columns(load_result_item(rf, "stats/uncond")).mean == [0.7, 2.9]
             @test load_result_item(rf, "plain")["value"] == Plain(3, [1.0, 2.0])
-            @test load_result_item(rf, "plain", Plain) == Plain(3, [1.0, 2.0])   # read_jld2's default
+            @test load_result_item(rf, "plain", Plain) == Plain(3, [1.0, 2.0])   # read_portable_jld2's default
             @test load_result_item(rf, "greek").α["value"] == 0.33
             move_result_item(rf, "greek/α", "greek/γ")
             @test keys(load_result_item(rf, "greek")) == (:β, :γ)
