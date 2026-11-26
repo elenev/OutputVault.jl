@@ -46,7 +46,7 @@ Reading
   no generic method.
 - `Formats` uses nothing else from OutputVault, so that it can become its own package.
 - Queries open only the files of the selected runs and placeholder values (synced folders download
-  what is opened). `sql/outputvault.sql` follows the same path grammar as the Julia code.
+  what is opened).
 
 Compatibility
 
@@ -55,8 +55,7 @@ Compatibility
 Windows
 
 - Open or memory-mapped files block renames and deletes. Parquet2 keeps files it has read mapped until
-  garbage collection. Tests use
-  `with_tempdir`, which collects garbage before removing the folder.
+  garbage collection. Tests use `with_tempdir`, which collects garbage before removing the folder.
 
 ## Code style
 

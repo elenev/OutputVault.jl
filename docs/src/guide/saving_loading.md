@@ -24,9 +24,10 @@ save_solution(rf, (; obj, stv); dirty_repo_check = :error)
 ```
 
 [`save_solution`](@ref) writes the new run to a folder under the staging root, renames the old run to
-a temporary name, renames the new one into place and deletes the old one. A failure at any point
-leaves either the old run or the new one in place; if only the final delete fails, a warning names the
-folder to delete.
+a temporary name, renames the new one into place and deletes the old one. It returns the run's folder.
+If a rename fails, no run is lost or partly deleted: the new run stays in the staging folder, which
+`save_solution` then returns with a warning that says where the new and the old run are
+([Files held open on Windows](#Files-held-open-on-Windows)).
 
 The native copy, `native.jld2`, holds each member of the solution NamedTuple under its name:
 

@@ -47,6 +47,8 @@ rowset(t) = collect(zip(values(t)...))
             @test keys(query_results([base], stats; sample = :absent)) == keys(t)
             @test isempty(query_results(RunPattern(; experdef = "none"), stats).value)
             @test isempty(query_results([base], stats; stat = :absent).value)
+            @test isempty(query_results([RunHandle("unsaved"; branch = "main", experdef = "v1")], stats).value)   # no run folder
+            @test_throws ArgumentError with_config(() -> query_results([base], stats), Config(; output_root = root))  # no table format
             err = try query_results([base], stats; shock = :tfp); nothing catch e; e end
             @test err isa ArgumentError && occursin("sample, variable, stat", err.msg)
         end

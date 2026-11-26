@@ -47,10 +47,10 @@ query_results(RunPattern(experdef = "v1"), shape; sample = :uncond, stat = :mean
 With TransitionFunctionIteration loaded, `save_result(rf, solve_and_simulate(mdl))` saves everything
 and `compare_economies(moments, RunPattern(experdef = "v1"))` compares the saved runs.
 
-> **Saving a solution replaces the run.** `save_solution` deletes everything saved for the run before,
+> Saving a solution replaces the run. `save_solution` deletes everything saved for the run before,
 > so save again what you still need. `save_result_item` adds to the run.
 >
-> **The branch and the git record come from the active project.** `RunHandle` defaults to the branch
+> The branch and the git record come from the active project. `RunHandle` defaults to the branch
 > of the repository holding the active Julia project, and `save_solution` records that repository's
 > commit and diffs, whatever the working directory. Pass `branch = ...` on a detached HEAD.
 

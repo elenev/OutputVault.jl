@@ -14,7 +14,7 @@ const RUN_COLUMN_NAMES = ["branch", "experdef", "variant"]
 """
     sql_path() -> String
 
-The path of `outputvault.sql`, the DuckDB macros over an output root, for use from any language.
+The path of `outputvault.sql`, DuckDB macros that read lists of table files, for use from any language.
 """
 sql_path() = joinpath(pkgdir(@__MODULE__), "sql", "outputvault.sql")
 

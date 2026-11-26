@@ -35,7 +35,7 @@ Without Parquet2 loaded, writing or reading a Parquet table is a `MethodError` w
 
 ## Adding a format
 
-A format is a type with five methods:
+A format is a type with four methods:
 
 ```julia
 using OutputVault.Formats
@@ -51,7 +51,10 @@ function write_table(::MyFormat, path, table; metadata = Dict{String,String}())
         MyIOPackage.write(tmp, table; metadata = meta)
     end
 end
-read_table(::MyFormat, path) = Formats.StoredTable(MyIOPackage.columns(path), MyIOPackage.metadata(path))
+function read_table(::MyFormat, path)
+    meta = filter(kv -> !startswith(first(kv), Formats.RESERVED_PREFIX), MyIOPackage.metadata(path))
+    return Formats.StoredTable(MyIOPackage.columns(path), meta)   # the format's own entries removed
+end
 ```
 
 `Base.iswritable(::MyFormat)` may return `false` for a format that is only read. `format_from_extension`
