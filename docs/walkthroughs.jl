@@ -1,10 +1,12 @@
-# The walkthrough pages (quick start, lifecycle) run their code: Documenter runs their @example and
-# @repl blocks when it builds the docs, and test/test_docs.jl runs the same blocks in fresh Julia
+# The walkthrough pages (the quick start) run their code: Documenter runs their @example and @repl
+# blocks when it builds the docs, and test/test_docs.jl runs the same blocks in fresh Julia
 # processes. Both run them in a throwaway git repository on branch `main`, prepared here, with the
-# pages' output root `../outputs` next to it. A ```julia block whose preceding paragraph begins
-# "Save this as `NAME`" is written to NAME in the repository.
+# pages' output root `../outputs` next to it. The repository holds an empty Project.toml and is the
+# active project, so that saved solutions record its commit; the environment with the packages
+# stays on the load path. A ```julia block whose preceding paragraph begins "Save this as `NAME`" is
+# written to NAME in the repository.
 
-const WALKTHROUGH_PAGES = ("quickstart.md", "lifecycle.md")
+const WALKTHROUGH_PAGES = ("quickstart.md",)
 walkthrough_path(page) = joinpath(@__DIR__, "src", "guide", page)
 
 # the ```julia blocks of a page that its text says to save as a file: the block after a paragraph
@@ -46,9 +48,24 @@ function walkthrough_repo()
         write(joinpath(repo, name), code)
     end
     write(joinpath(repo, "README"), "OutputVault walkthroughs\n")
+    write(joinpath(repo, "Project.toml"), "")
     git = `git -C $repo -c user.name=docs -c user.email=docs@example.com`
     run(pipeline(`$git init -q -b main`; stdout = devnull))
     run(`$git add -A`)
     run(`$git commit -q -m walkthroughs`)
     return repo
 end
+
+# make the walkthrough repository the active project, keeping the current environment on the load path
+function activate_walkthrough(repo)
+    env = Base.active_project()
+    pushfirst!(LOAD_PATH, env)
+    Base.ACTIVE_PROJECT[] = joinpath(repo, "Project.toml")
+    return env
+end
+
+# the command that runs a walkthrough script in a fresh process, in the repository as the active
+# project, with the environment `env` on the load path
+walkthrough_cmd(script, repo, env) =
+    addenv(Cmd(`$(Base.julia_cmd()) --project=$(joinpath(repo, "Project.toml")) $script`; dir = repo),
+           "JULIA_LOAD_PATH" => join(["@", env, "@stdlib"], Sys.iswindows() ? ";" : ":"))

@@ -34,7 +34,7 @@ end
                 for (name, blocks) in groups
                     script = joinpath(repo, "$name.jl")    # in the repository: `include` is relative to the script
                     write(script, walkthrough_script(blocks))
-                    cmd = Cmd(`$(Base.julia_cmd()) --project=$(Base.active_project()) $script`; dir = repo)
+                    cmd = walkthrough_cmd(script, repo, Base.active_project())
                     out = IOBuffer()
                     ok = run(pipeline(ignorestatus(cmd); stdout = out, stderr = out)).exitcode == 0
                     log = String(take!(out))

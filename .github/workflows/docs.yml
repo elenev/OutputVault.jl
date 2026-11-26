@@ -22,18 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # TransitionFunctionIteration is a private repository: check it out with a read-only deploy key and
-      # move it next to this repository, where the path sources in docs/ and test/ expect it
-      - name: Check out TransitionFunctionIteration
-        uses: actions/checkout@v4
-        with:
-          repository: elenev/TransitionFunctionIteration.jl
-          ssh-key: ${{ secrets.TFI_CHECKOUT_KEY }}
-          path: tfi_checkout
-      - name: Move it next to the repository
-        shell: bash
-        run: mv tfi_checkout ../TransitionFunctionIteration
-
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1.12'

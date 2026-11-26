@@ -1,62 +1,59 @@
 # Table Formats
 
-Tables (TFI's simulations, moment tables and IRFs, or a type of your own whose writer calls
-`write_table`) are stored through the configuration's *table format*, so that the choice of file format
-belongs to the project and not to the code that produces a table. A table is written together with its
-*metadata*: string key-value pairs that say what the table is and where it came from. Objects restore as
-their own types from the metadata, so a format must keep file-level metadata for them. Values that are
-not written as tables (see [Writing an Extension](@ref)) are saved with JLD2 whatever the table format.
+Tables are written in the format of the configuration (`Config(; table_format)`), one file per table.
+Formats live in `OutputVault.Formats`, a submodule that uses nothing else from OutputVault, so it can
+be used on its own:
+
+```julia
+using OutputVault.Formats, Parquet2
+write_table(ParquetFormat(), "t.parquet", (x = [1.0, 2.0], name = [:a, :b]); metadata = Dict("source" => "model"))
+t = read_table(ParquetFormat(), "t.parquet")     # a StoredTable: t.x, t.name, DataAPI.metadata(t, "source")
+```
+
+## What every format keeps
+
+- File-level string metadata: the table's own (`DataAPI.metadata`) merged with the `metadata`
+  argument. Column metadata is not kept.
+- Column types `Float64`, `Int64`, `Bool`, `String`, `Symbol` and `Date`, each optionally with
+  `missing`. A format may keep more; for a type it cannot keep, writing is an error, never a silent
+  change of type. Pooled and categorical columns are written as their values.
+- Atomic writes: the file is written to a temporary name and then moved into place.
+
+Reading returns a [`StoredTable`](@ref OutputVault.Formats.StoredTable), the columns in memory with
+the file's metadata.
 
 ## Parquet
 
-```julia
-using OutputVault, Parquet2
-Config(; output_root = "...", table_format = OutputVault.Formats.ParquetFormat())
-```
+[`ParquetFormat`](@ref OutputVault.Formats.ParquetFormat) needs `using Parquet2`, which loads the
+extension that reads and writes it. It keeps the metadata in Parquet's key-value metadata, and also
+`Float32`, `Int32` and `DateTime` columns. Parquet stores Symbols as strings; the format lists Symbol
+columns in an entry of the metadata, and they come back as Symbols. DuckDB, Python, R and MATLAB read
+the files directly.
 
-[`ParquetFormat`](@ref OutputVault.Formats.ParquetFormat) writes and reads Parquet files with Parquet2 (`.parquet`). Loading
-Parquet2 loads the extension that implements it; without it, using the format fails with a message
-that names the package to load. Parquet stores the metadata as file-level key-value pairs, and
-DuckDB, pandas and Arrow read the files directly.
+Without Parquet2 loaded, writing or reading a Parquet table is a `MethodError` whose message says
+`using Parquet2`.
 
-The keys in a file written by OutputVault:
+## Adding a format
 
-| Key | Meaning |
-|:--|:--|
-| `outputvault.kind` | the storage kind, e.g. `TransitionFunctionIteration.MomentArray`, which selects the reader |
-| `outputvault.part_of`, `outputvault.part_index` | for an object saved as several tables (moments by sample): the object and the position |
-| `tfi.*` | the producer's own (TFI's kind, row key, endogenous states, provenance) |
-
-## Another format
-
-A format implements three functions for its type:
+A format is a type with five methods:
 
 ```julia
-using OutputVault
-import OutputVault: AbstractTableFormat, table_extension, write_table_file, read_table_file, required_package
+using OutputVault.Formats
+import OutputVault.Formats: extension, format_from_extension, write_table, read_table
 
 struct MyFormat <: AbstractTableFormat end
+extension(::MyFormat) = "myext"
+format_from_extension(::Val{:myext}) = MyFormat()      # files *.myext are tables of this format
 
-table_extension(::MyFormat) = "myext"
-required_package(::MyFormat) = "MyIOPackage"            # named in the error if its methods are missing
-
-# write `table` (a Tables.jl source) to `path`, with its own metadata plus the entries of
-# `meta::Dict{String,String}` as file-level metadata
-write_table_file(::MyFormat, path, table, meta) = MyIOPackage.write(path, table; metadata = meta)
-
-# a Tables.jl source whose file-level metadata DataAPI.metadata(source, key, default) reads
-read_table_file(::MyFormat, path) = MyIOPackage.read(path)
+function write_table(::MyFormat, path, table; metadata = Dict{String,String}())
+    meta = Formats.table_metadata(table, metadata)       # the table's metadata merged with the argument
+    Formats.atomic_write(path) do tmp
+        MyIOPackage.write(tmp, table; metadata = meta)
+    end
+end
+read_table(::MyFormat, path) = Formats.StoredTable(MyIOPackage.columns(path), MyIOPackage.metadata(path))
 ```
 
-Put the methods in a package extension of OutputVault triggered by the IO package, as
-`OutputVaultParquet2Ext` is, and a user selects the format with `Config(; table_format = MyFormat())`
-after loading the IO package. For a quick format without a package extension:
-
-```julia
-fmt = TableFormat(ext = "myext",
-                  write = (path, table, meta) -> ...,
-                  read  = path -> ...)
-```
-
-A format without file-level metadata (plain CSV) can store tables but cannot restore TFI's types
-from them, because the kind is recorded in the metadata.
+`Base.iswritable(::MyFormat)` may return `false` for a format that is only read. `format_from_extension`
+is what makes a file a table file when a run is read: define it only in the package that defines the
+format. Queries ([Queries](@ref)) support the built-in formats.
