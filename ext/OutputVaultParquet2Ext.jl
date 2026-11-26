@@ -1,6 +1,7 @@
 # OutputVault.Formats.ParquetFormat: tables written and read with Parquet2, file metadata included.
 # Symbol columns are written as strings and listed under SYMBOL_COLUMNS_KEY, so that they are read
-# back as Symbols. Files are read from bytes, so no file stays memory-mapped.
+# back as Symbols. Files are read from bytes, so no file stays memory-mapped, and on the calling
+# task: Parquet2's parallel loading can wait forever when the load path changes.
 module OutputVaultParquet2Ext
 
 using OutputVault.Formats: Formats, ParquetFormat, StoredTable, PARQUET_TYPES
@@ -23,7 +24,7 @@ function write_table(::ParquetFormat, path, table; metadata = Dict{String,String
 end
 
 function read_table(::ParquetFormat, path)
-    ds = Parquet2.Dataset(read(path))
+    ds = Parquet2.Dataset(read(path); parallel_column_loading = false, parallel_page_loading = false)
     meta = Dict{String,String}(string(k) => string(v) for (k, v) in Parquet2.metadata(ds))
     symbols = Set(Symbol.(split(pop!(meta, SYMBOL_COLUMNS_KEY, ""), '\n'; keepempty = false)))
     cols = Tables.columntable(ds)
