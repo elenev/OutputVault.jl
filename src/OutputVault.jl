@@ -16,7 +16,7 @@ using Random: randstring
 include("Formats.jl")    # OutputVault.Formats: table file formats
 using .Formats: Formats, AbstractTableFormat, StoredTable
 
-export RunHandle, RunPattern, Config, AbstractConfig
+export RunHandle, RunPattern, Config
 export set_config!, with_config, current_branch, find_runs
 export to_storage, from_storage, write_jld2, read_jld2
 export save_solution, save_result_item, load_result_item, move_result_item, delete_result_item, list_run

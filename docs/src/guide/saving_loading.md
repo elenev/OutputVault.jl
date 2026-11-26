@@ -14,7 +14,7 @@ set_config!(Config(output_root = "/path/to/outputs",
 
 `staging_root` (default `<output_root>/.staging`) is where a solution's run is written before it is
 renamed into place; it must be on the same file system as the runs. A project that computes its
-settings (the root from the machine, say) defines a subtype of [`AbstractConfig`](@ref) instead.
+settings (the root from the machine, say) defines a subtype of [`OutputVault.AbstractConfig`](@ref) instead.
 
 ## Solutions
 

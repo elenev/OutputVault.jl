@@ -2,7 +2,7 @@
 # active configuration.
 
 """
-    AbstractConfig
+    OutputVault.AbstractConfig
 
 The interface behind [`Config`](@ref): the methods `output_root(cfg)`, `table_format(cfg)`,
 `native(cfg)` and `staging_root(cfg)`. A project that computes its settings (the root from the
@@ -69,17 +69,22 @@ table_format(cfg::Config) = cfg.table_format
 native(cfg::Config) = cfg.native
 staging_root(cfg::Config) = cfg.staging_root
 
-## The active configuration
+## The active configuration: a scoped override (with_config), else the global default (set_config!)
 
 const _GLOBAL_CONFIG = Ref{Union{AbstractConfig, Nothing}}(nothing)
+const _SCOPED_CONFIG = Base.ScopedValues.ScopedValue{Union{AbstractConfig, Nothing}}(nothing)
 
 """
     global_config() -> AbstractConfig
 
-The active configuration. An error if none is set.
+The active configuration: the one of the innermost [`with_config`](@ref), else the one set with
+[`set_config!`](@ref). An error if neither is set.
 """
 function global_config()
-    c = _GLOBAL_CONFIG[]
+    c = _SCOPED_CONFIG[]
+    if isnothing(c)
+        c = _GLOBAL_CONFIG[]
+    end
     if isnothing(c)
         error("No OutputVault config set. Call `OutputVault.set_config!(cfg)`.")
     end
@@ -89,8 +94,8 @@ end
 """
     set_config!(cfg::AbstractConfig) -> cfg
 
-Make `cfg` the active configuration, used by every OutputVault function. Typically called in a
-project package's `__init__`.
+Make `cfg` the active configuration, used by every OutputVault function outside a
+[`with_config`](@ref). Typically called in a project package's `__init__`.
 """
 function set_config!(cfg::AbstractConfig)
     _GLOBAL_CONFIG[] = cfg
@@ -100,15 +105,7 @@ end
 """
     with_config(f, cfg::AbstractConfig)
 
-Call `f()` with `cfg` as the active configuration, then restore the previous one, also if `f`
-throws.
+Call `f()` with `cfg` as the active configuration. The override holds only for `f` and the tasks it
+starts; other tasks keep their configuration, and nothing needs restoring when `f` returns or throws.
 """
-function with_config(f, cfg::AbstractConfig)
-    old = _GLOBAL_CONFIG[]
-    _GLOBAL_CONFIG[] = cfg
-    try
-        return f()
-    finally
-        _GLOBAL_CONFIG[] = old
-    end
-end
+with_config(f, cfg::AbstractConfig) = Base.ScopedValues.with(f, _SCOPED_CONFIG => cfg)

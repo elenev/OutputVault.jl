@@ -1,7 +1,7 @@
-struct MinimalConfig <: AbstractConfig end
+struct MinimalConfig <: OutputVault.AbstractConfig end
 OutputVault.output_root(::MinimalConfig) = "/tmp/minimal"
 
-struct NoRootConfig <: AbstractConfig end
+struct NoRootConfig <: OutputVault.AbstractConfig end
 
 @testset "Config" begin
     cfg = Config(; output_root = "/tmp/test")
@@ -30,6 +30,15 @@ end
         @test OutputVault.global_config() === a
         @test_throws ErrorException with_config(() -> error("x"), b)
         @test OutputVault.global_config() === a
+        # the override reaches tasks started inside it, and no task outside it
+        @test with_config(() -> fetch(Threads.@spawn OutputVault.global_config()), b) === b
+        inside = Channel{Nothing}(1); release = Channel{Nothing}(1)
+        t = Threads.@spawn with_config(b) do
+            put!(inside, nothing); take!(release)
+        end
+        take!(inside)
+        @test OutputVault.global_config() === a
+        put!(release, nothing); wait(t)
     finally
         OutputVault._GLOBAL_CONFIG[] = old
     end

@@ -12,7 +12,7 @@ RunPattern
 current_branch
 OutputVault.run_path
 Config
-AbstractConfig
+OutputVault.AbstractConfig
 OutputVault.output_root
 OutputVault.table_format
 OutputVault.native
