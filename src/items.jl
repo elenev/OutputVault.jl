@@ -149,7 +149,7 @@ Without a type, its data: a table file as a [`StoredTable`](@ref Formats.StoredT
 file metadata), a folder as a NamedTuple of its items in alphabetical order, and
 a `.jld2` file as a Dict of its contents.
 
-With a type `T`, the item restored as a `T`: `read_jld2(T, io; context)` for a `.jld2` file, and
+With a type `T`, the item restored as a `T`: `read_portable_jld2(T, io; context)` for a `.jld2` file, and
 otherwise `from_storage(T, data; context)` of its data.
 
 `load_result_item(rf, "solution"; native = true)` reads the native copy (`native.jld2`, or
@@ -230,21 +230,21 @@ end
 ## Listing a run
 
 """
-    RunContents
+    RunDisplay
 
-What a run holds, as returned by [`list_run`](@ref): `run` (the `RunHandle`), `provenance` (a
+What a run holds, as returned by [`list_run`](@ref), printed as a readable listing: `run` (the `RunHandle`), `provenance` (a
 NamedTuple `(; commit, dirty)`; `commit` is `nothing` if no commit was recorded) and `items` (a
 column table with `path`, `kind` (`:table`, `:jld2` or `:folder`) and `format`, the file
 extension).
 """
-struct RunContents
+struct RunDisplay
     run::RunHandle
     provenance::NamedTuple{(:commit, :dirty), Tuple{Union{Nothing, String}, Bool}}
     items::NamedTuple{(:path, :kind, :format), Tuple{Vector{String}, Vector{Symbol}, Vector{String}}}
 end
 
 """
-    list_run(rf::RunHandle) -> RunContents
+    list_run(rf::RunHandle) -> RunDisplay
 
 What the run holds, read from its folder: the run, its provenance (commit, dirty or not) and a
 table of its items, the solution's included, with their paths, kinds and formats.
@@ -253,7 +253,7 @@ function list_run(rf::RunHandle)
     dir = existing_run(rf)
     items = (path = String[], kind = Symbol[], format = String[])
     list_items!(items, dir, "")
-    return RunContents(rf, read_provenance(dir), items)
+    return RunDisplay(rf, read_provenance(dir), items)
 end
 
 function list_items!(items, dir, prefix)
@@ -289,7 +289,7 @@ function read_provenance(dir)
     return (; commit, dirty)
 end
 
-function Base.show(io::IO, ::MIME"text/plain", c::RunContents)
+function Base.show(io::IO, ::MIME"text/plain", c::RunDisplay)
     println(io, "Run ", c.run.branch, "/", run_folder_name(c.run))
     commit = isnothing(c.provenance.commit) ? "none recorded" : c.provenance.commit
     println(io, "  commit: ", commit, c.provenance.dirty ? " (dirty: diffs saved)" : "")
@@ -304,13 +304,13 @@ end
 """
     write_object_file(path, x)
 
-Save one object outside any run, as a `.jld2` file written by [`write_jld2`](@ref). The file is
+Save one object outside any run, as a `.jld2` file written by [`write_portable_jld2`](@ref). The file is
 written to a temporary name and then moved to `path`.
 """
 function write_object_file(path, x)
     tmp = path * ".tmp-" * randstring(8)
     try
-        jldopen(io -> write_jld2(io, x), tmp, "w")
+        jldopen(io -> write_portable_jld2(io, x), tmp, "w")
         mv(tmp, path; force = true)
     finally
         rm(tmp; force = true)
@@ -321,6 +321,6 @@ end
 """
     read_object_file(path, T; context = nothing)
 
-Restore an object saved by [`write_object_file`](@ref) as a `T`, with [`read_jld2`](@ref).
+Restore an object saved by [`write_object_file`](@ref) as a `T`, with [`read_portable_jld2`](@ref).
 """
-read_object_file(path, T::Type; context = nothing) = jldopen(io -> read_jld2(T, io; context), path, "r")
+read_object_file(path, T::Type; context = nothing) = jldopen(io -> read_portable_jld2(T, io; context), path, "r")

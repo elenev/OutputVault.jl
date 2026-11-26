@@ -31,7 +31,7 @@ load_result_item
 move_result_item
 delete_result_item
 list_run
-OutputVault.RunContents
+OutputVault.RunDisplay
 find_runs
 write_object_file
 read_object_file
@@ -42,8 +42,8 @@ read_object_file
 ```@docs
 to_storage
 from_storage
-write_jld2
-read_jld2
+write_portable_jld2
+read_portable_jld2
 ```
 
 ## Querying
