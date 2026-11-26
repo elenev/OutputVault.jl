@@ -1,11 +1,33 @@
-# Queries across runs with DuckDB. OutputVault writes all SQL; callers describe a family of table
-# items with a QueryShape and select with keyword arguments.
+# Queries across runs with DuckDB.
 #
-# How a query runs: the runs (find_runs for a RunPattern) and the shape's path pattern, with the
-# placeholder selections, are expanded to a list of files by listing folders, so only matching files
-# are opened. DuckDB reads them with vault_table_parquet (sql/outputvault.sql), combined by column
-# name; selections on keys become WHERE conditions, the table's other columns are cast to the
-# value type and turned to long form with UNPIVOT, which drops NULL cells.
+# A user describes a family of table items with a QueryShape and calls
+#   query_results(runs, shape; selections...)
+# which returns every selected cell of those tables, one row per cell (long form). Example:
+#
+#   shape = QueryShape("stats/{sample}"; keys = (:variable,), column = :stat)
+#   query_results(RunPattern(experdef = "v1"), shape; sample = :uncond, stat = :mean)
+#
+#   file main/res-v1-base/stats/uncond.parquet     result
+#     variable  mean  std                            branch experdef variant sample variable stat value
+#     c         0.71  0.02                    ->     main   v1       base    uncond c        mean 0.71
+#     k         2.90  0.11                           main   v1       base    uncond k        mean 2.90
+#
+# Terms. The path pattern has fixed levels ("stats") and placeholders ("{sample}"); a placeholder
+# matches any folder or file name and becomes an output column. Keys (:variable) are table columns
+# that identify a row and are copied to the output. Every other table column is a value column:
+# its name goes in the output column `column` (:stat), its cells in `value`. A selection is a
+# keyword named after a placeholder, a key or `column`.
+#
+# How it runs (query_results):
+# 1. Runs: find_runs for a RunPattern, or the given RunHandles.
+# 2. Files (shape_files, match_level!): in each run folder, the pattern is matched one level at a
+#    time against folder names, applying the placeholder selections, so only matching folders are
+#    listed and only matching files are later opened (and downloaded, in Dropbox).
+# 3. SQL (run_query): DuckDB reads the files into one table, columns matched by name. Each row
+#    gets its run and placeholder values from a join with a small table of the files; key
+#    selections become WHERE conditions; the value columns, narrowed by the `column` selection, are
+#    cast to the value type and UNPIVOTed into (column, value) pairs. Missing cells drop out.
+# 4. Result (tidy): a NamedTuple of vectors, without Missing in columns that have none.
 
 const DBI = DuckDB.DBInterface
 const RUN_COLUMNS = (:branch, :experdef, :variant)
@@ -121,56 +143,76 @@ end
 
 ## Files
 
-# the files of the shape's items in run `rf`, with their placeholder values: (file, values)
+# The files of the shape's items in run `rf`, each with its placeholder values: (file, values).
+#
+# The path pattern is matched level by level against the run's folders, so only folders that can
+# hold a match are listed. With the pattern "irf/{start}/stats" and the selection start = :ss:
+#   level 1 "irf"     a fixed name: descend into the folder irf/
+#   level 2 "{start}" a placeholder: descend into every folder whose name the selection accepts
+#                     (here only ss/), and record its name as the value of `start`
+#   level 3 "stats"   the last level: take the file stats.<ext>
 function shape_files(root, rf, shape, selections, ext)
     out = Tuple{String, Vector{String}}[]
     dir = run_path(root, rf)
     if isdir(dir)
-        walk_levels!(out, dir, shape, 1, String[], selections, ext)
+        match_level!(out, dir, shape, 1, String[], selections, ext)
     end
     return out
 end
 
-function walk_levels!(out, dir, shape, i, values, selections, ext)
+# Match level `i` of the pattern against the entries of `dir`. `values` holds the placeholder
+# values of the levels above; matching files are pushed to `out`.
+function match_level!(out, dir, shape, i, values, selections, ext)
     level = shape.levels[i]
-    last = i == length(shape.levels)
-    ph = placeholder_of(level)
-    for f in readdir(dir)
-        p = joinpath(dir, f)
-        if startswith(f, ".")
+    last = i == length(shape.levels)        # the last level names files, the others folders
+    placeholder = placeholder_of(level)     # nothing for a fixed name
+    for entry in readdir(dir)
+        path = joinpath(dir, entry)
+        name = level_name(path, entry, last, ext)
+        if isnothing(name)
             continue
         end
-        if last
-            if !(isfile(p) && endswith(f, "." * ext))
-                continue
-            end
-            name = f[1:end-length(ext)-1]
-        else
-            if !isdir(p)
-                continue
-            end
-            name = f
-        end
-        if occursin('.', name)
-            continue
-        end
-        if isnothing(ph)
+        if isnothing(placeholder)
             if name != level
                 continue
             end
-            vals = values
+            newvalues = values
         else
-            if haskey(selections, ph) && !selected(name, selection_values(selections[ph]))
+            if haskey(selections, placeholder) && !selected(name, selection_values(selections[placeholder]))
                 continue
             end
-            vals = vcat(values, name)
+            newvalues = vcat(values, name)
         end
         if last
-            push!(out, (p, vals))
+            push!(out, (path, newvalues))
         else
-            walk_levels!(out, p, shape, i + 1, vals, selections, ext)
+            match_level!(out, path, shape, i + 1, newvalues, selections, ext)
         end
     end
+end
+
+# The level name of a folder entry, or nothing if it cannot be one: on the last level a file of the
+# table format (its name without the extension), above it a folder. Names starting with '.'
+# (staging, temporary files, provenance) and names with '.' are never levels of an item path.
+function level_name(path, entry, last, ext)
+    if startswith(entry, ".")
+        return nothing
+    end
+    if last
+        if !(isfile(path) && endswith(entry, "." * ext))
+            return nothing
+        end
+        name = entry[1:end-length(ext)-1]
+    else
+        if !isdir(path)
+            return nothing
+        end
+        name = entry
+    end
+    if occursin('.', name)
+        return nothing
+    end
+    return name
 end
 
 run_list(runs::RunPattern, root) = find_runs(runs; root)
@@ -249,15 +291,34 @@ end
 reader(::Formats.ParquetFormat) = "vault_table_parquet"
 reader(fmt) = throw(ArgumentError("queries do not support the table format $(typeof(fmt))"))
 
+# Build and run the query over `files`, a vector of (file, run, placeholder values).
+#
+# Example: shape "stats/{sample}" with keys (:variable,) and column :stat, and the file of run
+# main/v1/base with sample "uncond":
+#   variable  mean  std
+#   c         0.71  0.02
+# 1. __files: one row per file with its run and placeholder values
+#      __file  branch  experdef  variant  sample
+# 2. __src: the files' rows, columns combined by name, with __file and __row (row in the file)
+# 3. the value columns: every column except the keys, __file and __row (here mean, std), narrowed
+#    by a selection on :stat
+# 4. join __src with __files to attach the run and placeholders, keep the rows the key selections
+#    allow, cast the value columns to the value type, and UNPIVOT: one row per cell
+#      branch  experdef  variant  sample  variable  stat  value
+#      main    v1        base     uncond  c         mean  0.71
+#      main    v1        base     uncond  c         std   0.02
 function run_query(con, shape, selections, files, fmt)
     q(sql) = Tables.columntable(DBI.execute(con, sql))
-    # the files and their keys, as a table to join on
+    # 1. the files and their run and placeholder values, as a table to join on
     fcols = vcat(["__file"], RUN_COLUMN_NAMES, string.(shape.placeholders))
     rows = ["(" * join(sqlstring.(vcat(f, rf.branch, rf.experdef, rf.variant, vals)), ", ") * ")" for (f, rf, vals) in files]
     DBI.execute(con, "CREATE TEMP TABLE __files(" * join(sqlident.(fcols) .* " VARCHAR", ", ") * ")")
     DBI.execute(con, "INSERT INTO __files VALUES " * join(rows, ", "))
+    # 2. the rows of all files
     src = "$(reader(fmt))($(sqllist(first.(files))))"
     DBI.execute(con, "CREATE TEMP VIEW __src AS SELECT * FROM $src")
+
+    # 3. the value columns
 
     columns = String.(q("SELECT column_name FROM (DESCRIBE SELECT * FROM __src)").column_name)
     for k in shape.keys
@@ -273,6 +334,8 @@ function run_query(con, shape, selections, files, fmt)
         return empty_result(shape)
     end
 
+    # 4. the query. The CASE gives each value column its position in the files, so that the cells
+    # of a row come out in the table's column order rather than alphabetically.
     T = sqltype(shape.valuetype)
     conds = [key_condition(k, selection_values(selections[k])) for k in shape.keys if haskey(selections, k)]
     where_ = isempty(conds) ? "" : "WHERE " * join(conds, " AND ")
@@ -292,6 +355,7 @@ function run_query(con, shape, selections, files, fmt)
         SELECT $(join(sqlident.(out), ", ")), $(sqlident(shape.column)), value
         FROM (UNPIVOT cast_ ON $(join(sqlident.(vcols), ", ")) INTO NAME $(sqlident(shape.column)) VALUE value)
         ORDER BY $order, __row, $colidx"""
+    # a failed cast aborts the whole query with DuckDB's message; find the column to name it
     result = try
         q(sql)
     catch err
@@ -317,7 +381,8 @@ function cast_failure(con, vcols, T, conds)
     return nothing
 end
 
-# columns without Missing where there is none, value as the value type
+# DuckDB returns columns of Union{Missing, T}; narrow those without missing values to T, and
+# convert value to the shape's value type
 function tidy(result, shape)
     names = keys(result)
     return NamedTuple{names}(map(names) do k
