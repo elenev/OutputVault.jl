@@ -37,6 +37,7 @@ end
 
 @testset "OutputVault" begin
     include("test_types.jl")
+    include("test_formats.jl")
     include("test_global_config.jl")
     include("test_filesystem.jl")
     include("test_git.jl")

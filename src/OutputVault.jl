@@ -5,8 +5,9 @@ using JLD2
 using FileIO
 using Glob
 using DataAPI: DataAPI
+using Tables: Tables
 
-export RunHandle, Config, TableFormat, LAYOUT
+export RunHandle, Config, LAYOUT
 export set_config!, with_config
 export output_path
 export save_result
@@ -15,6 +16,9 @@ export model_metadata, model_from_metadata
 export find_matching_results, get_results_folders
 export duckdb_sql_path, duckdb_statements, assemble_moments, split_by_economy
 export load  # re-exports FileIO.load (extended below)
+
+include("Formats.jl")     # OutputVault.Formats: table file formats
+using .Formats: Formats, AbstractTableFormat
 
 include("git.jl")        # current_branch, is_repo_clean, get_commit_id
 include("types.jl")      # RunHandle, LAYOUT, table formats (Formats), AbstractConfig, Config

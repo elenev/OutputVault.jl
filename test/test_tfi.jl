@@ -209,8 +209,8 @@ restore_dense(table) = MomentArray{ALLOC_ROWS, ALLOC_COLS, Float64, Matrix{Float
     R, C = length(ALLOC_ROWS), length(ALLOC_COLS)
     ma = MomentArray(reshape(collect(1.0:R*C), R, C), ALLOC_ROWS, ALLOC_COLS)
     path = joinpath(mktempdir(), "ma.parquet")
-    OutputVault.write_table_file(PARQUET, path, ma, Dict{String,String}())
-    ds = OutputVault.read_table_file(PARQUET, path)
+    OutputVault.Formats.write_table(PARQUET, path, ma)
+    ds = OutputVault.Formats.read_table(PARQUET, path)
     @test restore_static(ds) == ma && restore_dense(ds) == ma
     # baseline: Parquet2's part of the work (metadata entries, the column table and its names,
     # each column, the row names as Strings). The restore adds less than one matrix (static) or

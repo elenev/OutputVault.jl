@@ -247,7 +247,7 @@ function write_table(cfg::AbstractConfig, stem, table; meta = Dict{String,String
         "saving a $(nameof(typeof(table))) needs a table format: Config(; table_format = OutputVault.Formats.ParquetFormat()), for example"))
     kind = storage_kind(table)
     meta = isnothing(kind) ? Dict{String,String}(meta) : merge(Dict(TABLE_KIND_KEY => kind), meta)
-    write_table_file(fmt, stem * "." * table_extension(fmt), table, meta)
+    Formats.write_table(fmt, stem * "." * Formats.extension(fmt), table; metadata = meta)
 end
 
 """
@@ -301,11 +301,11 @@ read_kind(::Val{K}, args...; kwargs...) where {K} =
 function part_files(cfg::AbstractConfig, dir, name)
     fmt = table_format(cfg)
     (isnothing(fmt) || !isdir(dir)) && return Tuple{Int,Symbol,String}[]
-    ext = "." * table_extension(fmt)
+    ext = "." * Formats.extension(fmt)
     parts = Tuple{Int,Symbol,String}[]
     for f in readdir(dir; join = true)
         endswith(f, ext) || continue
-        source = read_table_file(fmt, f)
+        source = Formats.read_table(fmt, f)
         DataAPI.metadata(source, PART_OF_KEY, nothing) == name || continue
         push!(parts, (parse(Int, DataAPI.metadata(source, PART_INDEX_KEY)), Symbol(basename(f)[1:end-length(ext)]), f))
     end
@@ -318,7 +318,7 @@ function object_file(cfg::AbstractConfig, dir, name)
     isfile(jld) && return jld
     fmt = table_format(cfg)
     isnothing(fmt) && return nothing
-    path = joinpath(dir, name * "." * table_extension(fmt))
+    path = joinpath(dir, name * "." * Formats.extension(fmt))
     isfile(path) ? path : nothing
 end
 
@@ -331,9 +331,9 @@ function read_object(cfg::AbstractConfig, dir, name; model = nothing)
         parts = part_files(cfg, dir, name)
         isempty(parts) && error("No file for $name in $dir")
         fmt = table_format(cfg)
-        return NamedTuple{Tuple(p[2] for p in parts)}(Tuple(read_table(fmt, p[3]) for p in parts))
+        return NamedTuple{Tuple(p[2] for p in parts)}(Tuple(read_kind_table(fmt, p[3]) for p in parts))
     end
-    endswith(path, ".jld2") ? read_jld2(path; model) : read_table(table_format(cfg), path)
+    endswith(path, ".jld2") ? read_jld2(path; model) : read_kind_table(table_format(cfg), path)
 end
 
 # a JLD2 file: the reader for its recorded kind, else the stored value
@@ -343,8 +343,8 @@ function read_jld2(path; model = nothing)
 end
 
 # a table: the reader for the kind recorded in its metadata
-function read_table(fmt::AbstractTableFormat, path)
-    source = read_table_file(fmt, path)
+function read_kind_table(fmt::AbstractTableFormat, path)
+    source = Formats.read_table(fmt, path)
     kind = DataAPI.metadata(source, TABLE_KIND_KEY, nothing)
     isnothing(kind) && error("$path does not record its storage kind ($TABLE_KIND_KEY)")
     read_kind(Val(Symbol(kind)), source, path, fmt)

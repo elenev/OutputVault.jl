@@ -66,37 +66,11 @@ end
     @test_throws ArgumentError OutputVault.layout_properties(:other)
 end
 
-@testset "table formats" begin
-    fmt = TableFormat(ext = "txt", write = (path, t, m) -> write(path, "x"), read = path -> read(path, String))
-    @test OutputVault.table_extension(fmt) == "txt"
-    path = tempname() * ".txt"
-    OutputVault.write_table_file(fmt, path, nothing, Dict{String,String}())
-    @test OutputVault.read_table_file(fmt, path) == "x"
-    @test OutputVault.table_extension(OutputVault.Formats.ParquetFormat()) == "parquet"
-end
-
 struct _MinCfg <: OutputVault.AbstractConfig end  # module-level: struct inside @testset is a syntax error
-struct _NoContract <: OutputVault.AbstractTableFormat end
 
 @testset "AbstractConfig interface" begin
     mc = _MinCfg()
     @test_throws ErrorException OutputVault.output_root(mc)
     @test isnothing(OutputVault.table_format(mc))
     @test OutputVault.solution_format(mc) == (:portable, :native)
-    @test_throws ErrorException OutputVault.write_table_file(_NoContract(), "p", nothing, Dict{String,String}())
-end
-
-# a built-in-style format whose methods live in a package that is not loaded
-struct NeedsPackageFormat <: OutputVault.AbstractTableFormat end
-OutputVault.required_package(::NeedsPackageFormat) = :SomeFormatPackage
-struct NoContractFormat <: OutputVault.AbstractTableFormat end
-
-@testset "AbstractTableFormat — missing methods" begin
-    msg(f) = sprint(showerror, try f(); nothing catch e; e end)
-    @test occursin("NeedsPackageFormat needs its package: using SomeFormatPackage",
-                   msg(() -> OutputVault.write_table_file(NeedsPackageFormat(), "p", (a = [1],), Dict{String,String}())))
-    @test occursin("needs its package: using SomeFormatPackage",
-                   msg(() -> OutputVault.read_table_file(NeedsPackageFormat(), "p")))
-    @test occursin("does not implement the table-format contract",
-                   msg(() -> OutputVault.write_table_file(NoContractFormat(), "p", (a = [1],), Dict{String,String}())))
 end

@@ -25,7 +25,7 @@
 module OutputVaultTFIExt
 
 using OutputVault, FileIO, JLD2, StaticArrays, StructArrays
-using OutputVault: AbstractConfig, write_table, write_table_parts, jld2_record, table_extension, read_table_file
+using OutputVault: AbstractConfig, write_table, write_table_parts, jld2_record, Formats
 import OutputVault: storage_kind, write_object, read_kind, save_solution, load_solution,
                     save_steadystate, load_steadystate, model_metadata, model_from_metadata
 import TransitionFunctionIteration as TFI
@@ -126,8 +126,8 @@ read_kind(::kind(:SimulationPanel), source, path, fmt) = SimulationPanel(source)
 read_kind(::kind(:SimulationErrorPanel), source, path, fmt) = SimulationErrorPanel(source)
 read_kind(::kind(:MomentArray), source, path, fmt) = MomentArray(source)
 function read_kind(::kind(:IRFResult), source, path, fmt)
-    paths = splitext(path)[1] * "_paths." * table_extension(fmt)
-    isfile(paths) ? IRFResult(source, read_table_file(fmt, paths)) : IRFResult(source)
+    paths = splitext(path)[1] * "_paths." * Formats.extension(fmt)
+    isfile(paths) ? IRFResult(source, Formats.read_table(fmt, paths)) : IRFResult(source)
 end
 
 ## Model metadata
