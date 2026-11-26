@@ -56,7 +56,7 @@ trash_folders(final) = filter(startswith(".trash-"), readdir(dirname(final)))
         @testset "old run cannot be renamed: the new run stays in staging" begin
             with_vault() do root, repo
                 save_run(rf, 1, 1.0)
-                io = open(joinpath(run_path(rf), "provenance", "git_commit.txt"))   # an open file blocks the rename
+                io = open(joinpath(run_path(rf), ".provenance", "git_commit.txt"))   # an open file blocks the rename
                 path = @test_logs (:warn, r"NEW RUN NOT AT THE RUN'S PATH") save_run(rf, 2, 2.0)
                 close(io)
                 @test path != run_path(rf) && startswith(path, joinpath(root, ".staging"))

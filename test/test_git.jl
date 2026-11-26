@@ -1,4 +1,4 @@
-provenance_file(root, rf, f) = joinpath(OutputVault.run_path(root, rf), "provenance", f)
+provenance_file(root, rf, f) = joinpath(OutputVault.run_path(root, rf), ".provenance", f)
 
 @testset "provenance" begin
     rf = RunHandle("base"; branch = "main", experdef = "v1")

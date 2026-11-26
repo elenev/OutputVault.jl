@@ -141,7 +141,7 @@ function write_added_file(io, f, text)
     end
 end
 
-# provenance/ in the run folder `dir`
+# .provenance/ in the run folder `dir`
 function write_provenance(dir, g::GitState)
     p = mkpath(joinpath(dir, PROVENANCE))
     write(joinpath(p, "git_commit.txt"), g.commit)

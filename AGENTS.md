@@ -31,8 +31,8 @@ julia --project=docs docs/make.jl             # documentation, including the exe
 
 Saved results
 
-- OutputVault fixes only the path grammar and the reserved top-level names `solution`, `provenance`
-  and `native`. Every other name comes from the caller.
+- OutputVault fixes only the path grammar and the reserved top-level names `solution` and
+  `native`; the provenance is in `.provenance/`. Every other name comes from the caller.
 - `save_solution` replaces the whole run through a staging folder on the same file system; a failure
   must never lose or partly delete results. Result items are written to a temporary sibling and
   renamed into place.

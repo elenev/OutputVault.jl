@@ -11,7 +11,7 @@ computed from that solution as items saved at paths of your choice.
 ```
 <output_root>/<branch>/res-<experdef>-<variant>/
 ├── native.jld2       the solution as Julia objects (optional)
-├── provenance/       git_commit.txt  [git_staged.diff  git_unstaged.diff]
+├── .provenance/      git_commit.txt  [git_staged.diff  git_unstaged.diff]
 ├── solution/         the solution, e.g. obj.jld2  stv.jld2
 └── <result items>    e.g. stats/uncond.parquet  irf/ss/stats.parquet  notes.jld2
 ```

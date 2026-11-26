@@ -34,7 +34,7 @@ list_run(rf)
 The solution starts the run: [`save_solution`](@ref) replaces whatever the run held before. It is
 saved at the path `solution` by the storage rules: a NamedTuple is a folder, and so is the
 NamedTuple `params`; a value that is not a table or a NamedTuple is a `.jld2` file
-(`solution/params/α.jld2`, `solution/policy.jld2`). `provenance/git_commit.txt`
+(`solution/params/α.jld2`, `solution/policy.jld2`). `.provenance/git_commit.txt`
 holds the commit, and `native.jld2` holds the whole solution as Julia objects, for a fast reload with
 the same code.
 

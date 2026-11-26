@@ -7,7 +7,7 @@ A run is the saved results of one configuration of a model, in one folder:
 ```
 <output_root>/<branch>/res-<experdef>-<variant>/
 ├── native.jld2       the solution as Julia objects (optional)
-├── provenance/       git_commit.txt  [git_staged.diff  git_unstaged.diff]
+├── .provenance/      git_commit.txt  [git_staged.diff  git_unstaged.diff]
 ├── solution/ …       the solution, by the storage rules
 └── <result items> …  saved at paths chosen by the caller
 ```
@@ -29,7 +29,7 @@ A run starts with its solution. [`save_solution`](@ref) replaces the whole run, 
 results computed from two solutions. Result items are then saved with
 [`save_result_item`](@ref), at any time and in any order, at paths chosen when the code runs.
 OutputVault fixes no layout of possible outputs: it fixes only the grammar above and the reserved
-top-level names `solution`, `provenance` and `native`.
+top-level names `solution` and `native` (`.provenance` cannot be an item path, since names have no `.`).
 
 ## Paths
 
@@ -75,7 +75,7 @@ so values that are only meaningful together belong in one item.
 ## Provenance
 
 `save_solution` records the git state of the repository of the active project
-(`Base.active_project()`), whatever the working directory, in `provenance/`:
+(`Base.active_project()`), whatever the working directory, in `.provenance/`:
 
 - `git_commit.txt`: the commit, and one line `submodule <path> <commit>` per submodule;
 - if the repository is dirty, `git_staged.diff` and `git_unstaged.diff`. The unstaged diff includes

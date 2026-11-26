@@ -14,7 +14,7 @@ files_under(dir) = sort([relpath(joinpath(r, f), dir) for (r, _, fs) in walkdir(
             @test_throws ArgumentError save_result_item(rf, "stats", (a = [1],))    # no run yet
             dir = save_solution(rf, (; obj = Plain(1, [2.0]), params = (p = [:a, :b], value = [1.0, 2.0])))
             @test dir == OutputVault.run_path(root, rf)
-            @test files_under(dir) == ["native.jld2", joinpath("provenance", "git_commit.txt"),
+            @test files_under(dir) == [joinpath(".provenance", "git_commit.txt"), "native.jld2",
                                        joinpath("solution", "obj.jld2"), joinpath("solution", "params.parquet")]
             @test !isdir(joinpath(root, ".staging")) || isempty(readdir(joinpath(root, ".staging")))
 
@@ -47,7 +47,7 @@ files_under(dir) = sort([relpath(joinpath(r, f), dir) for (r, _, fs) in walkdir(
             @test_throws ArgumentError load_result_item(rf, "stats"; native = true)
             @test_throws MethodError load_result_item(rf, "stats", Plain)     # no from_storage method
             @test_throws ArgumentError load_result_item(rf, "absent")
-            @test_throws ArgumentError load_result_item(rf, "provenance")
+            @test_throws ArgumentError load_result_item(rf, ".provenance")
             @test_throws ArgumentError load_result_item(rf, "native")
         end
     end
@@ -58,7 +58,7 @@ files_under(dir) = sort([relpath(joinpath(r, f), dir) for (r, _, fs) in walkdir(
             for bad in ("", "a//b", "a.b", "a\\b", "/a", "a/")
                 @test_throws ArgumentError save_result_item(rf, bad, 1)
             end
-            for reserved in ("solution", "solution/x", "provenance", "native")
+            for reserved in ("solution", "solution/x", ".provenance", "native")
                 @test_throws ArgumentError save_result_item(rf, reserved, 1)
             end
             @test_throws ArgumentError save_result_item(rf, "t", (a = [1, 2], b = [1.0]))   # unequal lengths
@@ -96,7 +96,7 @@ files_under(dir) = sort([relpath(joinpath(r, f), dir) for (r, _, fs) in walkdir(
             dir = save_solution(rf, (; x = 1))
             save_result_item(rf, "stats", 2)
             @test save_solution(rf, (; y = 2)) == dir
-            @test files_under(dir) == [joinpath("provenance", "git_commit.txt"), joinpath("solution", "y.jld2")]
+            @test files_under(dir) == [joinpath(".provenance", "git_commit.txt"), joinpath("solution", "y.jld2")]
             @test_throws ArgumentError load_result_item(rf, "solution"; native = true)
             @test filter(!startswith("."), readdir(joinpath(root, "main"))) == ["res-v1-base"]
             @test !any(startswith(".trash"), readdir(joinpath(root, "main")))
@@ -127,7 +127,7 @@ files_under(dir) = sort([relpath(joinpath(r, f), dir) for (r, _, fs) in walkdir(
             @test !isdir(joinpath(dir, "irfs"))
             @test_throws ArgumentError delete_result_item(rf, "irfs")
             @test_throws ArgumentError delete_result_item(rf, "solution")
-            @test_throws ArgumentError delete_result_item(rf, "provenance")
+            @test_throws ArgumentError delete_result_item(rf, ".provenance")
         end
     end
 

@@ -6,9 +6,9 @@
 # place after the old item is removed. Readers skip names that start with '.'.
 
 const SOLUTION = "solution"
-const PROVENANCE = "provenance"
+const PROVENANCE = ".provenance"   # a dot name: never an item path
 const NATIVE = "native"
-const RESERVED = (SOLUTION, PROVENANCE, NATIVE)
+const RESERVED = (SOLUTION, NATIVE)
 const NATIVE_FILE = "native.jld2"
 const LEGACY_NATIVE_FILE = "res.jld2"      # the native copy in runs saved with OutputVault 0.3
 
@@ -75,11 +75,11 @@ function writable_levels(path)
     return levels
 end
 
-# levels of a path that may be read: not provenance or native
+# levels of a path that may be read: not native
 function readable_levels(path)
     levels = path_levels(path)
-    if levels[1] in (PROVENANCE, NATIVE)
-        throw(ArgumentError("\"$(levels[1])\" is not an item; use list_run for provenance and native = true for the native copy"))
+    if levels[1] == NATIVE
+        throw(ArgumentError("\"native\" is not an item; use native = true for the native copy"))
     end
     return levels
 end

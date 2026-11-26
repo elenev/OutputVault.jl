@@ -16,12 +16,12 @@ end
 Start the run `rf` over with `solution`: everything saved for the run before is replaced. The
 solution is written at the path `solution` by the storage rules (a NamedTuple `(; obj, stv)` gives
 `solution/obj.jld2` and `solution/stv.jld2`), the git state of the active project's repository in
-`provenance/`, and, if the configuration's `native` is set, the solution as Julia objects in
+`.provenance/`, and, if the configuration's `native` is set, the solution as Julia objects in
 `native.jld2`, one key per member of a NamedTuple.
 
 `dirty_repo_check` (`:warn`, `:error` or `:ignore`) says what to do when the repository has
 uncommitted changes, or there is none. A dirty repository's staged and unstaged diffs (the latter
-with untracked text files, up to 1 MB) are saved in `provenance/`.
+with untracked text files, up to 1 MB) are saved in `.provenance/`.
 
 The new run is written to a folder under `staging_root`, then renamed into place; the old run is
 renamed aside first and deleted last. Returns the folder holding the new run: the run's folder, or,
@@ -194,7 +194,7 @@ end
     move_result_item(rf::RunHandle, from, to)
 
 Move the item at path `from` to path `to` within the run, unchanged. An error if nothing is at
-`from` or something is at `to`. Neither may be under a reserved name (`solution`, `provenance`,
+`from` or something is at `to`. Neither may be under a reserved name (`solution`,
 `native`).
 """
 function move_result_item(rf::RunHandle, from, to)
@@ -259,7 +259,7 @@ end
 function list_items!(items, dir, prefix)
     for f in sort(readdir(dir))
         p = joinpath(dir, f)
-        if startswith(f, ".") || (isempty(prefix) && f in (PROVENANCE, NATIVE_FILE))
+        if startswith(f, ".") || (isempty(prefix) && f == NATIVE_FILE)
             continue
         end
         if isdir(p)
