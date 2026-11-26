@@ -11,7 +11,7 @@ built.
 ## Configure and name a run
 
 ```@example quickstart
-using OutputVault, Parquet2
+using OutputVault, Parquet2, Tables
 
 root = abspath("../outputs")       # your output folder
 set_config!(Config(output_root = root,
@@ -55,7 +55,7 @@ else is a `.jld2` file. Saving at a path replaces what was there.
 
 ```@example quickstart
 stats = load_result_item(rf, "stats/uncond")
-stats.mean
+Tables.columns(stats).mean
 ```
 
 ```@example quickstart
@@ -105,7 +105,7 @@ A type of your own is stored through two methods. Here is a summary table that k
 file's metadata:
 
 ```@example quickstart
-using Tables, DataAPI
+using DataAPI
 
 struct Summary
     label::String
@@ -123,7 +123,7 @@ DataAPI.metadata(s::Summary, ::AbstractString; style = false) = s.label
 
 # rebuild it from the data OutputVault reads back
 OutputVault.from_storage(::Type{Summary}, data; context = nothing) =
-    Summary(DataAPI.metadata(data, "label"), data.variable, data.mean)
+    Summary(DataAPI.metadata(data, "label"), Tables.columns(data).variable, Tables.columns(data).mean)
 
 save_result_item(rf, "summary", Summary("baseline", ["K", "C"], [3.4, 1.19]))
 s = load_result_item(rf, "summary", Summary)

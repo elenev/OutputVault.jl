@@ -14,12 +14,6 @@ DataAPI.metadatasupport(::Type{MetaTable}) = (read = true, write = false)
 DataAPI.metadatakeys(::MetaTable) = ("source", "version")
 DataAPI.metadata(::MetaTable, k::AbstractString; style = false) = k == "source" ? "model" : 2
 
-# a wrapped value, as in a categorical column
-struct Wrapped
-    x::String
-end
-DataAPI.unwrap(w::Wrapped) = w.x
-
 struct UnloadedFormat <: AbstractTableFormat end
 OutputVault.Formats.format_package(::Type{UnloadedFormat}) = "SomeIOPackage"
 
@@ -35,17 +29,18 @@ OutputVault.Formats.format_package(::Type{UnloadedFormat}) = "SomeIOPackage"
             path = joinpath(dir, "t.parquet")
             t = (f = [1.0, NaN], i = [1, 2], b = [true, false], s = ["a", "b"], y = [:x, :y],
                  d = [Date(2020, 1, 1), Date(2021, 2, 3)], m = [1.5, missing], f32 = Float32[1, 2],
-                 i32 = Int32[3, 4], dt = [DateTime(2020, 1, 1, 12), DateTime(2020, 1, 2)])
+                 i32 = Int32[3, 4], i8 = Int8[5, 6], ym = [:x, missing], dt = [DateTime(2020, 1, 1, 12), DateTime(2020, 1, 2)])
             write_table(fmt, path, t)
             r = read_table(fmt, path)
             @test r isa StoredTable
             @test Tables.istable(r)
+            c = Tables.columns(r)
             for k in keys(t)
-                @test isequal(Tables.getcolumn(r, k), t[k])
-                @test nonmissingtype(eltype(Tables.getcolumn(r, k))) == nonmissingtype(eltype(t[k]))
+                @test isequal(Tables.getcolumn(c, k), t[k])
+                @test nonmissingtype(eltype(Tables.getcolumn(c, k))) == nonmissingtype(eltype(t[k]))
             end
-            @test eltype(r.y) == Symbol
-            @test eltype(r.s) == String
+            @test eltype(c.y) == Symbol
+            @test eltype(c.s) == String
             @test isempty(DataAPI.metadatakeys(r))       # the Symbol-column entry is internal
             @test !any(startswith(".tmp"), readdir(dir)) && readdir(dir) == ["t.parquet"]
         end
@@ -64,14 +59,13 @@ OutputVault.Formats.format_package(::Type{UnloadedFormat}) = "SomeIOPackage"
         end
     end
 
-    @testset "unsupported and wrapped columns" begin
+    @testset "unsupported columns and reserved metadata" begin
         with_tempdir() do dir
             path = joinpath(dir, "u.parquet")
-            err = try write_table(fmt, path, (a = [1 + 2im],)); nothing catch e; e end
-            @test err isa ArgumentError && occursin("column a", err.msg)
-            @test !isfile(path)
-            write_table(fmt, path, (w = [Wrapped("p"), Wrapped("q")],))
-            @test read_table(fmt, path).w == ["p", "q"]
+            @test_throws Exception write_table(fmt, path, (a = [1 + 2im],))
+            @test readdir(dir) == []
+            @test_throws ArgumentError write_table(fmt, path, (a = [1],); metadata = Dict("outputvault.x" => "1"))
+            @test readdir(dir) == []
         end
     end
 
@@ -80,7 +74,7 @@ OutputVault.Formats.format_package(::Type{UnloadedFormat}) = "SomeIOPackage"
             path = joinpath(dir, "r.parquet")
             write_table(fmt, path, (a = [1],))
             write_table(fmt, path, (b = [2.0, 3.0],))
-            @test Tables.columnnames(read_table(fmt, path)) == (:b,)
+            @test Tables.columnnames(Tables.columns(read_table(fmt, path))) == (:b,)
         end
     end
 

@@ -1,37 +1,36 @@
 # OutputVault.Formats.ParquetFormat: tables written and read with Parquet2, file metadata included.
-# Symbol columns are written as strings and listed under SYMBOL_COLUMNS_KEY, so that they are read
-# back as Symbols. Files are read from bytes, so no file stays memory-mapped, and on the calling
-# task: Parquet2's parallel loading can wait forever when the load path changes.
+# Parquet has no Symbol type: Symbol columns are written as strings and listed under
+# SYMBOL_COLUMNS_KEY, so that they are read back as Symbols.
 module OutputVaultParquet2Ext
 
-using OutputVault.Formats: Formats, ParquetFormat, StoredTable, PARQUET_TYPES
+using OutputVault.Formats: Formats, ParquetFormat, StoredTable, RESERVED_PREFIX
 import OutputVault.Formats: write_table, read_table
 using Parquet2, Tables
 
-const SYMBOL_COLUMNS_KEY = "outputvault.symbol_columns"
+const SYMBOL_COLUMNS_KEY = RESERVED_PREFIX * "symbol_columns"
+
+issymbolcol(v) = nonmissingtype(eltype(v)) === Symbol
 
 function write_table(::ParquetFormat, path, table; metadata = Dict{String,String}())
     meta = Formats.table_metadata(table, metadata)
-    cols = Formats.plain_columns(table, PARQUET_TYPES)
-    symbols = [string(k) for (k, v) in pairs(cols) if nonmissingtype(eltype(v)) === Symbol]
+    cols = Tables.columntable(table)
+    symbols = [string(k) for k in keys(cols) if issymbolcol(cols[k])]
     if !isempty(symbols)
         meta[SYMBOL_COLUMNS_KEY] = join(symbols, '\n')
     end
-    cols = map(v -> nonmissingtype(eltype(v)) === Symbol ? map(x -> ismissing(x) ? x : String(x), v) : v, cols)
+    cols = map(v -> issymbolcol(v) ? map(x -> ismissing(x) ? x : String(x), v) : v, cols)
     Formats.atomic_write(path) do tmp
         Parquet2.writefile(tmp, cols; metadata = meta)
     end
 end
 
 function read_table(::ParquetFormat, path)
-    ds = Parquet2.Dataset(read(path); parallel_column_loading = false, parallel_page_loading = false)
+    ds = Parquet2.Dataset(path)
     meta = Dict{String,String}(string(k) => string(v) for (k, v) in Parquet2.metadata(ds))
-    symbols = Set(Symbol.(split(pop!(meta, SYMBOL_COLUMNS_KEY, ""), '\n'; keepempty = false)))
+    symbols = Set(Symbol.(split(get(meta, SYMBOL_COLUMNS_KEY, ""), '\n'; keepempty = false)))
+    filter!(kv -> !startswith(first(kv), RESERVED_PREFIX), meta)
     cols = Tables.columntable(ds)
-    cols = NamedTuple{keys(cols)}(map(keys(cols)) do k
-        v = collect(cols[k])
-        k in symbols ? map(x -> ismissing(x) ? x : Symbol(x), v) : v
-    end)
+    cols = NamedTuple{keys(cols)}(map(k -> k in symbols ? map(x -> ismissing(x) ? x : Symbol(x), cols[k]) : cols[k], keys(cols)))
     return StoredTable(cols, meta)
 end
 

@@ -64,6 +64,7 @@ end
     include("test_config.jl")
     include("test_git.jl")
     include("test_items.jl")
+    include("test_replace.jl")
     include("test_frontend.jl")
     include("test_discovery.jl")
     include("test_query.jl")

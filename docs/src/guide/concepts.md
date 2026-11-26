@@ -62,8 +62,8 @@ never see half an item.
 
 OutputVault reads data and never lets a file choose the code that reads it:
 
-- a table file is read into memory as a [`StoredTable`](@ref OutputVault.Formats.StoredTable), its
-  columns with the file's metadata; no file handle stays open;
+- a table file is a [`StoredTable`](@ref OutputVault.Formats.StoredTable), its columns with the
+  file's metadata;
 - a folder is a NamedTuple of its items, in alphabetical order;
 - a `.jld2` file is a Dict of its contents.
 

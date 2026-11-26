@@ -81,7 +81,12 @@ read_object_file("obj.jld2", T; context)
 
 ## Files held open on Windows
 
-A file that is open, or memory-mapped, cannot be renamed or deleted on Windows. OutputVault reads
-tables into memory and closes its files, but a file opened by other code, or a shell or Julia session
-whose working directory is inside the run, can make replacing a run fail. The error then leaves the old
-run in place.
+A file that is open, or memory-mapped, cannot be renamed or deleted on Windows. Parquet2 keeps the
+files of tables it has read mapped until Julia's garbage collector frees them (`GC.gc()`); a file
+opened by other code, or a shell or Julia session whose working directory is inside the run, also
+holds it. When such a file blocks replacing a run, no run is lost or partly deleted:
+
+- if the old run cannot be renamed aside, it stays where it is, the new run stays in the staging
+  folder, and `save_solution` returns the staging folder with a warning that says where both are;
+- if only the delete of the old run fails, the new run is in place and a warning names the old
+  folder (`.trash-…` next to the run) to delete by hand.

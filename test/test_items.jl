@@ -31,9 +31,9 @@ files_under(dir) = sort([relpath(joinpath(r, f), dir) for (r, _, fs) in walkdir(
             stats = load_result_item(rf, "stats")
             @test keys(stats) == (:n, :note, :uncond)                     # alphabetical
             @test stats.uncond isa Formats.StoredTable
-            @test stats.uncond.variable == [:c, :k] && stats.uncond.mean == [0.7, 2.9]
+            @test Tables.columns(stats.uncond).variable == [:c, :k] && Tables.columns(stats.uncond).mean == [0.7, 2.9]
             @test stats.note == Dict("value" => "text")
-            @test load_result_item(rf, "stats/uncond").mean == [0.7, 2.9]
+            @test Tables.columns(load_result_item(rf, "stats/uncond")).mean == [0.7, 2.9]
             @test load_result_item(rf, "plain")["value"] == Plain(3, [1.0, 2.0])
             @test load_result_item(rf, "plain", Plain) == Plain(3, [1.0, 2.0])   # read_jld2's default
             @test load_result_item(rf, "greek").α["value"] == 0.33
@@ -42,7 +42,7 @@ files_under(dir) = sort([relpath(joinpath(r, f), dir) for (r, _, fs) in walkdir(
             @test "greek/γ" in list_run(rf).items.path
             @test load_result_item(rf, "irf").ss.extra.deep["value"] == Plain(2, Float64[])
             sol = load_result_item(rf, "solution")
-            @test keys(sol) == (:obj, :params) && sol.params.p == [:a, :b]
+            @test keys(sol) == (:obj, :params) && Tables.columns(sol.params).p == [:a, :b]
             @test load_result_item(rf, "solution"; native = true) == (obj = Plain(1, [2.0]), params = (p = [:a, :b], value = [1.0, 2.0]))
             @test_throws ArgumentError load_result_item(rf, "stats"; native = true)
             @test_throws MethodError load_result_item(rf, "stats", Plain)     # no from_storage method

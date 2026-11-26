@@ -14,7 +14,6 @@ module Formats
 
 using Tables: Tables
 using DataAPI: DataAPI
-using Dates: Date, DateTime
 using Random: randstring
 
 export AbstractTableFormat, ParquetFormat, StoredTable
@@ -54,7 +53,7 @@ function write_table end
 """
     read_table(fmt, path) -> StoredTable
 
-Read the table at `path` into memory, with its file-level metadata. No file handle stays open.
+Read the table at `path`, with its file-level metadata.
 """
 function read_table end
 
@@ -73,8 +72,8 @@ Base.iswritable(::AbstractTableFormat) = true
 
 Parquet files, written and read with Parquet2 (needs `using Parquet2`). File metadata are kept in
 Parquet's key-value metadata. Symbol columns, which Parquet stores as strings, are listed in an
-entry of that metadata and come back as Symbols. Column types: `Float64`, `Float32`, `Int64`,
-`Int32`, `Bool`, `String`, `Symbol`, `Date`, `DateTime`, each optionally with `missing`.
+entry of that metadata and come back as Symbols. Other columns are passed to Parquet2 as they are;
+a type it cannot store is an error from Parquet2.
 """
 struct ParquetFormat <: AbstractTableFormat end
 extension(::ParquetFormat) = "parquet"
@@ -95,13 +94,14 @@ function missing_format_hint(io, exc, argtypes, kwargs)
     print(io, "\n$(nameof(argtypes[1])) needs its package: `using $pkg`.")
 end
 
-## Tables read into memory
+## Tables read from files
 
 """
     StoredTable
 
 A table read from a file: its columns (a NamedTuple of vectors) and its file-level metadata (a
-`Dict{String,String}`). It is a Tables.jl column table, and `DataAPI.metadata` reads the metadata.
+`Dict{String,String}`). It is a Tables.jl column table (`Tables.columns(t)` returns the columns), and `DataAPI.metadata`
+reads the metadata.
 """
 struct StoredTable{C <: NamedTuple}
     columns::C
@@ -110,39 +110,35 @@ end
 
 Tables.istable(::Type{<:StoredTable}) = true
 Tables.columnaccess(::Type{<:StoredTable}) = true
-Tables.columns(t::StoredTable) = getfield(t, :columns)
-Tables.getcolumn(t::StoredTable, i::Int) = getfield(t, :columns)[i]
-Tables.getcolumn(t::StoredTable, nm::Symbol) = getfield(t, :columns)[nm]
-Tables.columnnames(t::StoredTable) = keys(getfield(t, :columns))
-Tables.schema(t::StoredTable) = Tables.schema(getfield(t, :columns))
-Base.propertynames(t::StoredTable) = keys(getfield(t, :columns))
-Base.getproperty(t::StoredTable, nm::Symbol) = getfield(t, :columns)[nm]
-Base.length(t::StoredTable) = Tables.rowcount(getfield(t, :columns))
-Base.:(==)(a::StoredTable, b::StoredTable) =
-    getfield(a, :columns) == getfield(b, :columns) && getfield(a, :metadata) == getfield(b, :metadata)
+Tables.columns(t::StoredTable) = t.columns
+Base.:(==)(a::StoredTable, b::StoredTable) = a.columns == b.columns && a.metadata == b.metadata
 
 DataAPI.metadatasupport(::Type{<:StoredTable}) = (read = true, write = false)
-DataAPI.metadatakeys(t::StoredTable) = keys(getfield(t, :metadata))
+DataAPI.metadatakeys(t::StoredTable) = keys(t.metadata)
 function DataAPI.metadata(t::StoredTable, key::AbstractString; style::Bool = false)
-    v = getfield(t, :metadata)[key]
+    v = t.metadata[key]
     return style ? (v, :default) : v
 end
 function DataAPI.metadata(t::StoredTable, key::AbstractString, default; style::Bool = false)
-    v = get(getfield(t, :metadata), key, default)
+    v = get(t.metadata, key, default)
     return style ? (v, :default) : v
-end
-
-function Base.show(io::IO, t::StoredTable)
-    cols = getfield(t, :columns)
-    print(io, "StoredTable: ", Tables.rowcount(cols), " rows, columns ", join(keys(cols), ", "))
 end
 
 ## Helpers for format implementations
 
 """
+    RESERVED_PREFIX
+
+Metadata keys that start with `"outputvault."` belong to the formats. A table's own metadata may not
+use them, and reading removes them, so the metadata read back is exactly the metadata written.
+"""
+const RESERVED_PREFIX = "outputvault."
+
+"""
     table_metadata(table, metadata) -> Dict{String,String}
 
 The table's own file-level metadata (`DataAPI.metadata`, values as strings) merged with `metadata`.
+A key that starts with [`RESERVED_PREFIX`](@ref) is an `ArgumentError`.
 """
 function table_metadata(table, metadata)
     out = Dict{String,String}()
@@ -151,32 +147,14 @@ function table_metadata(table, metadata)
             out[string(k)] = string(DataAPI.metadata(table, k))
         end
     end
-    return merge(out, Dict{String,String}(string(k) => string(v) for (k, v) in metadata))
-end
-
-"""
-    plain_columns(table, allowed) -> NamedTuple
-
-The table's columns as `Vector`s. Pooled and categorical columns become vectors of their values
-(`DataAPI.unwrap`). A column whose element type (without `Missing`) is not in `allowed` is an
-`ArgumentError` naming the column.
-"""
-function plain_columns(table, allowed)
-    cols = Tables.columntable(table)
-    return NamedTuple{keys(cols)}(map(keys(cols)) do name
-        col = cols[name]
-        v = collect(col)
-        if !allowed_eltype(eltype(v), allowed)
-            v = map(DataAPI.unwrap, v)
+    merge!(out, Dict{String,String}(string(k) => string(v) for (k, v) in metadata))
+    for k in keys(out)
+        if startswith(k, RESERVED_PREFIX)
+            throw(ArgumentError("metadata key $k: keys starting with $RESERVED_PREFIX are reserved for OutputVault"))
         end
-        if !allowed_eltype(eltype(v), allowed)
-            throw(ArgumentError("column $name has element type $(eltype(col)), which the format cannot store; supported: $(join(allowed, ", ")) (each optionally with missing)"))
-        end
-        v
-    end)
+    end
+    return out
 end
-
-allowed_eltype(T, allowed) = any(A -> nonmissingtype(T) <: A, allowed) && nonmissingtype(T) !== Union{}
 
 """
     atomic_write(f, path)
@@ -193,8 +171,6 @@ function atomic_write(f, path)
     end
     return path
 end
-
-const PARQUET_TYPES = (Float64, Float32, Int64, Int32, Bool, String, Symbol, Date, DateTime)
 
 __init__() = Base.Experimental.register_error_hint(missing_format_hint, MethodError)
 

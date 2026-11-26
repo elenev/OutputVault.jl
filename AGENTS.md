@@ -54,7 +54,8 @@ Compatibility
 
 Windows
 
-- Open or memory-mapped files block renames and deletes. Tables are read into memory. Tests use
+- Open or memory-mapped files block renames and deletes. Parquet2 keeps files it has read mapped until
+  garbage collection. Tests use
   `with_tempdir`, which collects garbage before removing the folder.
 
 ## Code style

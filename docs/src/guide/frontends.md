@@ -44,9 +44,10 @@ end
 # a folder: a one-row parameter table (queryable) and the settings (.jld2 files)
 to_storage(e::Economy) = (params = (beta = [e.beta], sigma = [e.sigma]), settings = (; e.distro, e.mit))
 
-from_storage(::Type{Economy}, data; context = nothing) =
-    Economy(only(data.params.beta), only(data.params.sigma),
-            data.settings.distro["value"], data.settings.mit["value"])
+function from_storage(::Type{Economy}, data; context = nothing)
+    params = Tables.columns(data.params)
+    return Economy(only(params.beta), only(params.sigma), data.settings.distro["value"], data.settings.mit["value"])
+end
 
 # a solution with its own layout inside a .jld2 file; the model comes from the caller
 struct Solution

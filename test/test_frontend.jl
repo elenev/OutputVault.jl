@@ -16,7 +16,7 @@ Tables.columns(p::Panel) = (t = p.t, y = p.y)
 DataAPI.metadatasupport(::Type{Panel}) = (read = true, write = false)
 DataAPI.metadatakeys(::Panel) = ("label",)
 DataAPI.metadata(p::Panel, ::AbstractString; style = false) = p.label
-from_storage(::Type{Panel}, data; context = nothing) = Panel(DataAPI.metadata(data, "label"), data.t, data.y)
+from_storage(::Type{Panel}, data; context = nothing) = Panel(DataAPI.metadata(data, "label"), Tables.columns(data).t, Tables.columns(data).y)
 
 # an economy: parameters (a one-row table), a panel and settings with strings and booleans
 struct Economy
@@ -27,9 +27,11 @@ struct Economy
 end
 to_storage(e::Economy) = (params = (beta = [e.params.beta], sigma = [e.params.sigma]), panel = e.panel,
                           settings = (; e.distro, e.mit))
-from_storage(::Type{Economy}, data; context = nothing) =
-    Economy((beta = only(data.params.beta), sigma = only(data.params.sigma)),
-            from_storage(Panel, data.panel), data.settings.distro["value"], data.settings.mit["value"])
+function from_storage(::Type{Economy}, data; context = nothing)
+    params = Tables.columns(data.params)
+    return Economy((beta = only(params.beta), sigma = only(params.sigma)),
+                   from_storage(Panel, data.panel), data.settings.distro["value"], data.settings.mit["value"])
+end
 
 # a solution with a portable layout inside its .jld2 file; the model comes from `context`
 struct Solution

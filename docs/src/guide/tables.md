@@ -7,26 +7,26 @@ be used on its own:
 ```julia
 using OutputVault.Formats, Parquet2
 write_table(ParquetFormat(), "t.parquet", (x = [1.0, 2.0], name = [:a, :b]); metadata = Dict("source" => "model"))
-t = read_table(ParquetFormat(), "t.parquet")     # a StoredTable: t.x, t.name, DataAPI.metadata(t, "source")
+t = read_table(ParquetFormat(), "t.parquet")     # a StoredTable: Tables.columns(t).x, DataAPI.metadata(t, "source")
 ```
 
 ## What every format keeps
 
 - File-level string metadata: the table's own (`DataAPI.metadata`) merged with the `metadata`
-  argument. Column metadata is not kept.
-- Column types `Float64`, `Int64`, `Bool`, `String`, `Symbol` and `Date`, each optionally with
-  `missing`. A format may keep more; for a type it cannot keep, writing is an error, never a silent
-  change of type. Pooled and categorical columns are written as their values.
+  argument. Keys starting with `outputvault.` are reserved for the format's own entries: writing
+  them is an error, and reading removes them, so the metadata read back is the metadata written.
+  Column metadata is not kept.
+- Column types: whatever the format's I/O package stores. A type it cannot store is an error from
+  that package.
 - Atomic writes: the file is written to a temporary name and then moved into place.
 
-Reading returns a [`StoredTable`](@ref OutputVault.Formats.StoredTable), the columns in memory with
-the file's metadata.
+Reading returns a [`StoredTable`](@ref OutputVault.Formats.StoredTable), its columns with the
+file's metadata.
 
 ## Parquet
 
 [`ParquetFormat`](@ref OutputVault.Formats.ParquetFormat) needs `using Parquet2`, which loads the
-extension that reads and writes it. It keeps the metadata in Parquet's key-value metadata, and also
-`Float32`, `Int32` and `DateTime` columns. Parquet stores Symbols as strings; the format lists Symbol
+extension that reads and writes it. It keeps the metadata in Parquet's key-value metadata. Parquet stores Symbols as strings; the format lists Symbol
 columns in an entry of the metadata, and they come back as Symbols. DuckDB, Python, R and MATLAB read
 the files directly.
 

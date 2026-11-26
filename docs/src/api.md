@@ -76,7 +76,7 @@ OutputVault.Formats.format_from_extension
 OutputVault.Formats.write_table
 OutputVault.Formats.read_table
 Base.iswritable(::OutputVault.Formats.AbstractTableFormat)
+OutputVault.Formats.RESERVED_PREFIX
 OutputVault.Formats.table_metadata
-OutputVault.Formats.plain_columns
 OutputVault.Formats.atomic_write
 ```

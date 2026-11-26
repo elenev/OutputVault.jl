@@ -24,8 +24,10 @@ uncommitted changes, or there is none. A dirty repository's staged and unstaged 
 with untracked text files, up to 1 MB) are saved in `provenance/`.
 
 The new run is written to a folder under `staging_root`, then renamed into place; the old run is
-renamed aside first and deleted last, so a failure leaves either run intact. Returns the run's
-folder.
+renamed aside first and deleted last. Returns the folder holding the new run: the run's folder, or,
+if a rename or move failed (on Windows, open files can block them), the staging folder, with a
+warning that says where the new and the old run are. If only the final delete fails, the new run is
+in place and a warning names the old folder to delete by hand.
 """
 function save_solution(rf::RunHandle, solution; dirty_repo_check::Symbol = :warn)
     cfg = global_config()
@@ -38,11 +40,11 @@ function save_solution(rf::RunHandle, solution; dirty_repo_check::Symbol = :warn
         if native(cfg)
             write_native(joinpath(stage, NATIVE_FILE), solution)
         end
-        return replace_run(stage, run_path(output_root(cfg), rf))
     catch
         rm(stage; recursive = true, force = true)
         rethrow()
     end
+    return replace_run(stage, run_path(output_root(cfg), rf))
 end
 
 # the solution as Julia objects: one key per member of a NamedTuple, else the key "solution"
@@ -58,21 +60,32 @@ function write_native(path, solution)
     end
 end
 
-# put the staged run in place of the run folder `final`: old run aside, new one in, old one deleted
+# put the staged run in place of the run folder `final`: old run aside, new one in, old one deleted.
+# On Windows, open or memory-mapped files can block a rename or a delete. Whatever fails, no run is
+# lost or partly deleted: `final` holds the new run or the intact old one, and a warning says where
+# both are. Returns the folder holding the new run.
 function replace_run(stage, final)
     parent = mkpath(dirname(final))
     trash = joinpath(parent, ".trash-" * basename(final) * "-" * randstring(8))
     had_old = isdir(final)
     if had_old
-        mv(final, trash)
+        try
+            mv(final, trash)
+        catch err
+            return stranded(stage, final, "the existing run cannot be renamed", err)
+        end
     end
     try
         move_folder(stage, final)
-    catch
+    catch err
         if had_old
-            mv(trash, final)
+            try
+                mv(trash, final)
+            catch err2
+                return stranded(stage, final, "the new run cannot be moved into place and the old one cannot be restored", err2; trash)
+            end
         end
-        rethrow()
+        return stranded(stage, final, "the new run cannot be moved into place", err)
     end
     if had_old
         try
@@ -82,6 +95,16 @@ function replace_run(stage, final)
         end
     end
     return final
+end
+
+function stranded(stage, final, reason, err; trash = nothing)
+    old = isnothing(trash) ? "unchanged: $final" : "renamed to $trash (nothing is at $final)"
+    @warn """NEW RUN NOT AT THE RUN'S PATH: $reason.
+      new run:  $stage
+      old run:  $old
+      reason:   $(sprint(showerror, err))
+      Close whatever holds files in the old run (on Windows: open files, a shell or Julia session in it), then move the new run into place."""
+    return stage
 end
 
 # rename, or copy when the staging root is on another file system
@@ -123,7 +146,7 @@ end
 The item at `path` in the run.
 
 Without a type, its data: a table file as a [`StoredTable`](@ref Formats.StoredTable) (columns and
-file metadata, read into memory), a folder as a NamedTuple of its items in alphabetical order, and
+file metadata), a folder as a NamedTuple of its items in alphabetical order, and
 a `.jld2` file as a Dict of its contents.
 
 With a type `T`, the item restored as a `T`: `read_jld2(T, io; context)` for a `.jld2` file, and
