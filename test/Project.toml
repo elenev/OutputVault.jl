@@ -1,10 +1,15 @@
 [deps]
 DataAPI = "9a962f9c-6df0-11e9-0e5d-c546b8b5ee8a"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+DuckDB = "d2f5444f-75bc-4fdf-ac35-56f514c445e1"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+OutputVault = "73131c07-f5bc-4fd3-b98a-1e5f3b14898e"
 Parquet2 = "98572fba-bba0-415d-956f-fa77e587d26d"
 Tables = "bd369af6-aec1-5ad0-b16a-f7cc5008161c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[sources]
+OutputVault = {path = ".."}
 
 [compat]
 JLD2 = "0.6"

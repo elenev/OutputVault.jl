@@ -1,167 +1,73 @@
--- OutputVault: DuckDB interface to an output root.
+-- OutputVault: DuckDB macros over an output root.
 --
--- Load this file into a DuckDB connection, then query the table macros with the output root
--- (the `output_root` of the project's OutputVault Config), for example
---   SELECT * FROM vault_stats('/path/to/output_root', experdef_glob := 'v1') WHERE economy = 'base';
+-- Load this file into a DuckDB connection (OutputVault.vault_connection() does it in Julia), then
+-- query with the output root of the project's configuration, for example
+--   SELECT * FROM vault_runs('/path/to/output_root', branch_glob := '**');
+--   SELECT * FROM vault_objects('/path/to/output_root', experdef_glob := 'v1') WHERE format = 'parquet';
+--   SELECT * FROM vault_table_parquet(['/path/.../stats/uncond.parquet', ...]);
 -- Statements are separated by ';' at the end of a line; clients that run one statement per call
--- (DuckDB.jl) run them one by one (OutputVault.duckdb_statements() returns them).
+-- run them one by one (OutputVault.sql_statements() returns them).
 --
--- Layout read: <root>/<branch>/res-<experdef>-<economy>/<component>/<file>.parquet (a branch
--- with '/' is nested folders; its name is everything between the root and res-).
--- experdef contains no '-' (RunHandle enforces it), so the folder name splits at the first hyphen
--- after "res-"; economy may contain anything. Paths are normalized to '/' (Windows).
+-- Layout: <root>/<branch>/res-<experdef>-<variant>/<item path>.<ext>. A branch with '/' is nested
+-- folders, and none of its levels starts with 'res-', so the first level that does is the run.
+-- experdef contains no '-', so the run folder splits at its first hyphen after 'res-'. Item paths
+-- are levels without '.', so the extension is everything after the first '.' of the last level.
+-- Names that start with '.' (staging and temporary files) are not runs or items. Paths are
+-- normalized to '/' (Windows).
 --
--- Macros (each also takes the economy split and the glob filters, see below):
---   long form throughout; stat is the statistic's name and value a DOUBLE
---   vault_stats(root)       moments by sample: branch, experdef, economy, sample, variable, stat, value
---   vault_errstats(root)    error statistics:  branch, experdef, economy, equation, stat, value
---   vault_params(root)      model parameters:  branch, experdef, economy, parameter, value
---   vault_irf(root)         impulse responses: branch, experdef, economy, shock, stat, period, variable, value
---   vault_simulation(root)  simulation panels: branch, experdef, economy, then the panel's columns
---   vault_runs(root)        saved runs:        branch, experdef, economy
---
--- Filtering files: every macro takes the named arguments branch_glob and experdef_glob (glob
--- patterns, default '**' and '*'), which narrow the files that are read, so that only matching runs
--- are opened (this matters when the root is a synced folder with online-only files),
---   SELECT * FROM vault_stats('/root', branch_glob := 'main', experdef_glob := 'v1');
--- vault_stats, vault_errstats, vault_params, vault_irf and vault_simulation also take economies, a
--- list of economy glob patterns (default ['*']); each pattern must match a saved component of some
--- run, or DuckDB reports that no files match,
---   SELECT * FROM vault_stats('/root', economies := ['base', 'alt']);
---
--- Splitting economy: pass the globs (all five arguments are then positional) and a regex with one
--- capture group per part and the names of the parts,
---   SELECT * FROM vault_stats('/root', '**', '*', '^([^_]+)(?:_(.+))?$', ['model', 'scheme']);
--- adds the columns model and scheme after economy ('' where a group or the regex does not match).
--- OutputVault imposes no naming convention on economy; the regex is the project's.
+-- Globs: '*' matches within one level, '**' across levels (branch_glob := '**' includes nested
+-- branches). DuckDB lists folders to expand a glob and opens only the files that match, so in a
+-- synced folder with online-only files, narrow globs download only what is read.
 
 -- a path relative to the root, with '/' separators
 CREATE OR REPLACE MACRO vault_relpath(root, path) AS
     ltrim(replace(path, '\', '/')[length(rtrim(replace(root, '\', '/'), '/')) + 1:], '/');
 
--- run identity and file stem of a parquet file path; branch is everything above res-..., so
--- branches with '/' (nested folders) keep their full name
+-- the run and item of a file: branch, experdef, variant, path (the item path) and format (the
+-- extension); empty strings if the file is not an item of a run
 CREATE OR REPLACE MACRO vault_path_keys(root, path) AS
     regexp_extract(vault_relpath(root, path),
-                   '^(.+)/res-([^-/]+)-([^/]+)/[^/]+/([^/]+)\.parquet$',
-                   ['branch', 'experdef', 'economy', 'file']);
+                   '^((?:[^./][^/]*/)*?[^./][^/]*)/res-([^-/]+)-([^/]+)/([^./][^/.]*(?:/[^./][^/.]*)*)\.([^/]+)$',
+                   ['branch', 'experdef', 'variant', 'path', 'format']);
 
--- a moment table (a column of row names plus one column per statistic) in long form, with its file
--- keys. TFI's MomentArray names its column of row names itself: `variable` in statistics, `equation`
--- in error statistics, `parameter` in parameters (one macro each, since the column is named in SQL).
-CREATE OR REPLACE MACRO vault_moments_long(root, pattern) AS TABLE
-    WITH long AS (
-        UNPIVOT (SELECT * FROM read_parquet(pattern, filename = true, union_by_name = true))
-        ON COLUMNS(* EXCLUDE (variable, filename))
-        INTO NAME stat VALUE value
+-- the saved runs (folders with a provenance record; in runs saved with OutputVault 0.3 it is in
+-- solution/)
+CREATE OR REPLACE MACRO vault_runs(root, branch_glob := '*', experdef_glob := '*', variant_glob := '*') AS TABLE
+    SELECT DISTINCT k.branch, k.experdef, k.variant
+    FROM (
+        SELECT vault_path_keys(root, file) AS k
+        FROM glob(root || '/' || branch_glob || '/res-' || experdef_glob || '-' || variant_glob || '/*/git_commit.txt')
     )
-    SELECT vault_path_keys(root, filename) AS k, variable, stat, CAST(value AS DOUBLE) AS value
-    FROM long;
+    WHERE k.branch <> '' AND k.path IN ('provenance/git_commit', 'solution/git_commit')
+    ORDER BY ALL;
 
-CREATE OR REPLACE MACRO vault_equations_long(root, pattern) AS TABLE
-    WITH long AS (
-        UNPIVOT (SELECT * FROM read_parquet(pattern, filename = true, union_by_name = true))
-        ON COLUMNS(* EXCLUDE (equation, filename))
-        INTO NAME stat VALUE value
+-- the items of the saved runs: one row per table or .jld2 file, with its run, item path, format
+-- and file; the provenance and the native copy are not items
+CREATE OR REPLACE MACRO vault_objects(root, branch_glob := '*', experdef_glob := '*', variant_glob := '*',
+                                      path_glob := '**') AS TABLE
+    SELECT k.branch, k.experdef, k.variant, k.path, k.format, file
+    FROM (
+        SELECT vault_path_keys(root, file) AS k, file
+        FROM glob(root || '/' || branch_glob || '/res-' || experdef_glob || '-' || variant_glob || '/' || path_glob || '/*.*')
     )
-    SELECT vault_path_keys(root, filename) AS k, equation, stat, CAST(value AS DOUBLE) AS value
-    FROM long;
+    WHERE k.branch <> '' AND k.format NOT IN ('txt', 'diff') AND k.path NOT LIKE 'provenance/%'
+          AND k.path <> 'native' AND k.path <> 'solution/res'
+    ORDER BY ALL;
 
-CREATE OR REPLACE MACRO vault_parameters_long(root, pattern) AS TABLE
-    WITH long AS (
-        UNPIVOT (SELECT * FROM read_parquet(pattern, filename = true, union_by_name = true))
-        ON COLUMNS(* EXCLUDE (parameter, filename))
-        INTO NAME stat VALUE value
-    )
-    SELECT vault_path_keys(root, filename) AS k, parameter, stat, CAST(value AS DOUBLE) AS value
-    FROM long;
+-- the tables of a list of Parquet files, combined by column name, with the file (__file) and the
+-- row's position in it (__row, from 0)
+CREATE OR REPLACE MACRO vault_table_parquet(files) AS TABLE
+    SELECT * EXCLUDE (file_row_number), file_row_number AS __row
+    FROM read_parquet(files, filename = '__file', union_by_name = true, file_row_number = true);
 
--- a simulation panel with its file keys
-CREATE OR REPLACE MACRO vault_panel(root, pattern) AS TABLE
-    SELECT vault_path_keys(root, filename) AS k, * EXCLUDE (filename)
-    FROM read_parquet(pattern, filename = true, union_by_name = true);
+-- the file-level metadata of a list of Parquet files: one row per file and key
+CREATE OR REPLACE MACRO vault_metadata_parquet(files) AS TABLE
+    SELECT file_name AS file, decode(key) AS key, decode(value) AS value
+    FROM parquet_kv_metadata(files)
+    WHERE decode(key) <> 'outputvault.symbol_columns';
 
--- impulse responses (__shock, __stat, __period plus one column per variable) in long form
-CREATE OR REPLACE MACRO vault_irf_long(root, pattern) AS TABLE
-    WITH long AS (
-        UNPIVOT (SELECT * FROM read_parquet(pattern, filename = true, union_by_name = true))
-        ON COLUMNS(* EXCLUDE (__shock, __stat, __period, filename))
-        INTO NAME variable VALUE value
-    )
-    SELECT vault_path_keys(root, filename) AS k, __shock AS shock, __stat AS stat, __period AS period,
-           variable, CAST(value AS DOUBLE) AS value
-    FROM long;
-
--- the glob of a component's files: `files` is the path below the run's folder
-CREATE OR REPLACE MACRO vault_glob(root, branch_glob, experdef_glob, files) AS
-    root || '/' || branch_glob || '/res-' || experdef_glob || '-*/' || files;
-
--- the globs of a component's files for a list of economy patterns (read_parquet takes a list)
-CREATE OR REPLACE MACRO vault_globs(root, branch_glob, experdef_glob, economies, files) AS
-    list_transform(economies, lambda e: root || '/' || branch_glob || '/res-' || experdef_glob || '-' || e || '/' || files);
-
--- the runs under a root, from their solution folders
-CREATE OR REPLACE MACRO vault_run_keys(root, branch_glob, experdef_glob) AS TABLE
-    SELECT DISTINCT regexp_extract(vault_relpath(root, file),
-                                   '^(.+)/res-([^-/]+)-([^/]+)/solution/[^/]+$',
-                                   ['branch', 'experdef', 'economy']) AS k
-    FROM glob(vault_glob(root, branch_glob, experdef_glob, 'solution/*'));
-
-CREATE OR REPLACE MACRO vault_stats
-    (root, branch_glob := '**', experdef_glob := '*', economies := ['*']) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, k.file AS sample, variable, stat, value
-        FROM vault_moments_long(root, vault_globs(root, branch_glob, experdef_glob, economies, 'stats/*.parquet'))
-    ),
-    (root, branch_glob, experdef_glob, economy_regex, economy_names) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, UNNEST(regexp_extract(k.economy, economy_regex, economy_names)), k.file AS sample, variable, stat, value
-        FROM vault_moments_long(root, vault_globs(root, branch_glob, experdef_glob, ['*'], 'stats/*.parquet'))
-    );
-
-CREATE OR REPLACE MACRO vault_errstats
-    (root, branch_glob := '**', experdef_glob := '*', economies := ['*']) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, equation, stat, value
-        FROM vault_equations_long(root, vault_globs(root, branch_glob, experdef_glob, economies, 'errstats/errstats.parquet'))
-    ),
-    (root, branch_glob, experdef_glob, economy_regex, economy_names) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, UNNEST(regexp_extract(k.economy, economy_regex, economy_names)), equation, stat, value
-        FROM vault_equations_long(root, vault_globs(root, branch_glob, experdef_glob, ['*'], 'errstats/errstats.parquet'))
-    );
-
-CREATE OR REPLACE MACRO vault_params
-    (root, branch_glob := '**', experdef_glob := '*', economies := ['*']) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, parameter, value
-        FROM vault_parameters_long(root, vault_globs(root, branch_glob, experdef_glob, economies, 'params/params.parquet'))
-    ),
-    (root, branch_glob, experdef_glob, economy_regex, economy_names) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, UNNEST(regexp_extract(k.economy, economy_regex, economy_names)), parameter, value
-        FROM vault_parameters_long(root, vault_globs(root, branch_glob, experdef_glob, ['*'], 'params/params.parquet'))
-    );
-
-CREATE OR REPLACE MACRO vault_irf
-    (root, branch_glob := '**', experdef_glob := '*', economies := ['*']) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, shock, stat, period, variable, value
-        FROM vault_irf_long(root, vault_globs(root, branch_glob, experdef_glob, economies, 'irf/irf.parquet'))
-    ),
-    (root, branch_glob, experdef_glob, economy_regex, economy_names) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, UNNEST(regexp_extract(k.economy, economy_regex, economy_names)), shock, stat, period, variable, value
-        FROM vault_irf_long(root, vault_globs(root, branch_glob, experdef_glob, ['*'], 'irf/irf.parquet'))
-    );
-
-CREATE OR REPLACE MACRO vault_simulation
-    (root, branch_glob := '**', experdef_glob := '*', economies := ['*']) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, * EXCLUDE (k)
-        FROM vault_panel(root, vault_globs(root, branch_glob, experdef_glob, economies, 'simulation/simseries.parquet'))
-    ),
-    (root, branch_glob, experdef_glob, economy_regex, economy_names) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, UNNEST(regexp_extract(k.economy, economy_regex, economy_names)), * EXCLUDE (k)
-        FROM vault_panel(root, vault_globs(root, branch_glob, experdef_glob, ['*'], 'simulation/simseries.parquet'))
-    );
-
-CREATE OR REPLACE MACRO vault_runs
-    (root, branch_glob := '**', experdef_glob := '*') AS TABLE (
-        SELECT k.branch, k.experdef, k.economy FROM vault_run_keys(root, branch_glob, experdef_glob)
-    ),
-    (root, branch_glob, experdef_glob, economy_regex, economy_names) AS TABLE (
-        SELECT k.branch, k.experdef, k.economy, UNNEST(regexp_extract(k.economy, economy_regex, economy_names))
-        FROM vault_run_keys(root, branch_glob, experdef_glob)
-    );
+-- the variant split into named parts by a regex with one capture group per part, as a struct
+-- (UNNEST it for columns), e.g. vault_split_variant(variant, '^([a-z]+)(\d*)$', ['scheme', 'level']);
+-- '' where a group or the regex does not match. OutputVault imposes no naming convention.
+CREATE OR REPLACE MACRO vault_split_variant(variant, regex, names) AS
+    regexp_extract(variant, regex, names);
