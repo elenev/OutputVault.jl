@@ -135,6 +135,44 @@ function remove_item(stem)
     end
 end
 
+# put the new item `tmp` at `final`, in place of every form of the item at `stem`: old forms aside,
+# new one in, old ones deleted. If a rename fails, the old forms are put back. On Windows, open or
+# memory-mapped files can block a delete, which only warns.
+function replace_item(tmp, final, stem)
+    old = item_forms(stem)
+    suffix = ".old-" * randstring(8)
+    aside = [joinpath(dirname(p), "." * basename(p) * suffix) for p in old]
+    moved = 0
+    try
+        for (p, a) in zip(old, aside)
+            Base.rename(p, a)
+            moved += 1
+        end
+        Base.rename(tmp, final)
+    catch
+        restore_forms(aside[1:moved], old[1:moved])
+        rethrow()
+    end
+    for a in aside
+        try
+            rm(a; recursive = true)
+        catch err
+            @warn "The item is saved, but its old copy could not be deleted; delete it by hand" old_copy = a exception = err
+        end
+    end
+end
+
+# move the old forms of an item back after a failed replacement
+function restore_forms(aside, old)
+    for (a, p) in zip(aside, old)
+        try
+            Base.rename(a, p)
+        catch err
+            @warn "The old item could not be moved back; rename it by hand" old_copy = a item = p exception = err
+        end
+    end
+end
+
 # an error if a parent of the item (levels[1:end-1] under `root`) is a file
 function check_parents(root, levels, path)
     for i in 1:length(levels)-1
@@ -187,8 +225,7 @@ function write_item(dir, name, v, fmt, path)
             tmp, final = tmpstem * ".jld2", joinpath(dir, name * ".jld2")
             jldopen(io -> write_portable_jld2(io, s), tmp, "w")
         end
-        remove_item(joinpath(dir, name))
-        mv(tmp, final)
+        replace_item(tmp, final, joinpath(dir, name))
     catch
         rm(isempty(tmp) ? tmpstem : tmp; recursive = true, force = true)
         rethrow()

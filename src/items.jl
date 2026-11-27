@@ -140,6 +140,10 @@ storage rules: a table file `path.<ext>`, a folder `path/` for a NamedTuple, or 
 was at `path` before is replaced, a folder with everything in it. The run's solution must have been
 saved. Saving below an item that is a file (`"irf/ss"` when `irf.jld2` exists) is an error.
 Returns the item's file or folder.
+
+A save that fails leaves the old item as it was. On Windows, if a file of the old item is still
+open (a Parquet file stays open after it is read until garbage collection), the new item is saved
+and the old copy stays beside it under a hidden name, with a warning.
 """
 function save_result_item(rf::RunHandle, path, value)
     levels = writable_levels(path)

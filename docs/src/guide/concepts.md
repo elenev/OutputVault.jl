@@ -67,7 +67,9 @@ Saving at a path replaces what is there, in every form (`p.<ext>`, `p.jld2`, `p/
 `stats` replaces the whole folder, including samples saved separately as `stats/boom`; to add one
 sample, save `stats/boom`. Saving below an item that is a file (`irf/tfp` when `irf.jld2` exists) is an
 error. Each item is written to a temporary name next to it and then renamed into place, so readers
-never see half an item.
+never see half an item. The old item is renamed aside first and deleted last, so a save that fails
+leaves it as it was. On Windows, an old copy holding a file that is still open cannot be deleted: it
+stays beside the new item under a hidden name, and a warning names it.
 
 ## Reading returns data
 

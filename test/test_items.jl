@@ -121,6 +121,73 @@ files_under(dir) = sort([relpath(joinpath(r, f), dir) for (r, _, fs) in walkdir(
         end
     end
 
+    # Windows keeps a Parquet file open after it is read, which blocks its deletion, and an open
+    # handle blocks renaming its folder. On every platform the item must stay whole.
+    @testset "saving over an item" begin
+        with_vault() do root, repo
+            dir = save_solution(rf, (; x = 1))
+            column(t) = only(Tables.columns(t).a)
+            values_of(item) = map(column, load_result_item(rf, item))
+            stats(u, c) = (uncond = (a = [u],), crisis = (a = [c],))
+            leftovers() = filter(f -> contains(f, ".old-") || contains(f, ".tmp-"), readdir(dir))
+
+            # a folder item with a member read earlier
+            save_result_item(rf, "stats", stats(1.0, 2.0))
+            read_before = load_result_item(rf, "stats/uncond")
+            save_result_item(rf, "stats", (uncond = (a = [3.0],), boom = (a = [4.0],)))
+            @test values_of("stats") == (boom = 4.0, uncond = 3.0)
+            @test column(read_before) == 1.0
+
+            # a file item read earlier
+            save_result_item(rf, "table", (a = [1.0],))
+            read_before = load_result_item(rf, "table")
+            save_result_item(rf, "table", (a = [2.0],))
+            @test column(load_result_item(rf, "table")) == 2.0
+            @test column(read_before) == 1.0
+            @test filter(!startswith("solution"), list_run(rf).items.path) == ["stats", "stats/boom", "stats/uncond", "table"]
+
+            # an open handle in the old item: the save fails on Windows and leaves the old item
+            save_result_item(rf, "held", stats(1.0, 2.0))
+            io = open(joinpath(dir, "held", "crisis.parquet"))
+            if Sys.iswindows()
+                @test_throws Base.IOError save_result_item(rf, "held", stats(5.0, 6.0))
+                @test values_of("held") == (crisis = 2.0, uncond = 1.0)
+            else
+                save_result_item(rf, "held", stats(5.0, 6.0))
+                @test values_of("held") == (crisis = 6.0, uncond = 5.0)
+            end
+            close(io)
+            save_result_item(rf, "held", stats(7.0, 8.0))
+            @test values_of("held") == (crisis = 8.0, uncond = 7.0)
+
+            # the new item cannot be moved into place: the old one is moved back
+            stem = joinpath(dir, "held")
+            @test_throws Base.IOError OutputVault.replace_item(joinpath(dir, ".none"), stem, stem)
+            @test values_of("held") == (crisis = 8.0, uncond = 7.0)
+            @test_logs (:warn, r"could not be moved back") OutputVault.restore_forms([joinpath(dir, ".none")], [stem])
+
+            # another form replaces the old one
+            save_result_item(rf, "z", 1)
+            save_result_item(rf, "z", (a = [1.0],))
+            @test isfile(joinpath(dir, "z.parquet")) && !ispath(joinpath(dir, "z.jld2"))
+
+            # only Windows may leave old copies, and they are hidden
+            if !Sys.iswindows()
+                @test isempty(leftovers())
+            end
+            @test !any(contains(".old-"), list_run(rf).items.path)
+
+            # an old copy that cannot be deleted only warns (here a read-only folder)
+            if !Sys.iswindows()
+                save_result_item(rf, "locked", stats(1.0, 2.0))
+                chmod(joinpath(dir, "locked"), 0o500)
+                @test_logs (:warn, r"old copy could not be deleted") save_result_item(rf, "locked", stats(3.0, 4.0))
+                @test values_of("locked") == (crisis = 4.0, uncond = 3.0)
+                chmod(joinpath(dir, only(leftovers())), 0o700)
+            end
+        end
+    end
+
     @testset "move and delete" begin
         with_vault() do root, repo
             dir = save_solution(rf, (; x = 1))

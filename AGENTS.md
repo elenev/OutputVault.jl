@@ -35,7 +35,8 @@ Saved results
   `native`; the provenance is in `.provenance/`. Every other name comes from the caller.
 - `save_solution` replaces the whole run through a staging folder on the same file system; a failure
   must never lose or partly delete results. Result items are written to a temporary sibling and
-  renamed into place.
+  renamed into place, with the old item renamed aside first and deleted last. Move with
+  `Base.rename`: `mv` falls back to copy and delete, which can delete part of a folder.
 - Names that start with `.` (staging, temporary and replaced folders) are never runs or items.
 - `experdef` cannot contain `-`: the run folder splits at the first hyphen after `res-`.
 - Provenance comes from the repository of the active project. Never write that repository's index.
