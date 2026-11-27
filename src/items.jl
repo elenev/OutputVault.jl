@@ -109,12 +109,13 @@ function stranded(stage, final, reason, err; trash = nothing)
     return stage
 end
 
-# rename, or copy when the staging root is on another file system
+# rename, or copy when the staging root is on another file system (a rename across file systems
+# fails with EXDEV)
 function move_folder(src, dst)
     try
         Base.rename(src, dst)
-    catch
-        if ispath(dst) || !isdir(src)
+    catch err
+        if !(err isa Base.IOError && err.code == Base.UV_EXDEV) || ispath(dst)
             rethrow()
         end
         try
@@ -123,7 +124,11 @@ function move_folder(src, dst)
             rm(dst; recursive = true, force = true)
             rethrow()
         end
-        rm(src; recursive = true, force = true)
+        try
+            rm(src; recursive = true, force = true)
+        catch cleanup_err
+            @warn "The new run was copied into place, but its staging folder could not be deleted; delete it by hand" src exception = cleanup_err
+        end
     end
 end
 
@@ -318,7 +323,7 @@ function write_object_file(path, x)
     tmp = path * ".tmp-" * randstring(8)
     try
         jldopen(io -> write_portable_jld2(io, x), tmp, "w")
-        mv(tmp, path; force = true)
+        Base.rename(tmp, path)
     finally
         rm(tmp; force = true)
     end

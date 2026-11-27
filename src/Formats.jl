@@ -165,7 +165,7 @@ function atomic_write(f, path)
     tmp = path * ".tmp-" * randstring(8)
     try
         f(tmp)
-        mv(tmp, path; force = true)
+        Base.rename(tmp, path)
     finally
         rm(tmp; force = true)
     end
