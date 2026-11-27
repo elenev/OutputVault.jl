@@ -2,142 +2,109 @@
 
 ## Configuration
 
-A [`Config`](@ref) holds a project's settings:
+Run storage and queries use the active configuration, set once with [`set_config!`](@ref) (a
+project package typically calls it in its `__init__`) or for a block of code with
+[`with_config`](@ref):
 
 ```julia
 using OutputVault, Parquet2
 
-cfg = Config(
-    output_root     = "/path/to/outputs",
-    table_format    = OutputVault.Formats.ParquetFormat(),
-    solution_format = (:portable, :native),     # the default; or :portable, or :native
-)
+set_config!(Config(output_root = "/path/to/outputs",
+                   table_format = OutputVault.Formats.ParquetFormat(),   # needed only to write tables
+                   native = true))                                       # also write native.jld2
 ```
 
-- `output_root`: where all runs are saved.
-- `table_format`: how tables (simulations, moments, IRFs) are stored; see [Table Formats](@ref).
-  Without one, saving a table is an error that says so.
-- `solution_format`: which copies of the solution to save ([Runs and the Layout](@ref)).
-- `staging_root`: where a replacing solution is written before it is moved into place (default: a
-  folder in the system temp directory); see [Replacing a run](@ref).
+`staging_root` (default `<output_root>/.staging`) is where a solution's run is written before it is
+renamed into place; it must be on the same file system as the runs. A project that computes its
+settings (the root from the machine, say) defines a subtype of [`OutputVault.AbstractConfig`](@ref) instead.
 
-Every function that needs a configuration takes one as its first argument, and has a form
-without it that uses the active configuration. A package or script sets it once:
+For a temporary override, including tasks started inside the block:
 
 ```julia
-set_config!(cfg)                      # e.g. in a package's __init__
-with_config(cfg2) do                  # scoped: the previous one is restored, even on an error
-    save_result(rf, result)
+with_config(Config(output_root = mktempdir())) do
+    trial = RunHandle("trial"; branch = "scratch")
+    save_solution(trial, (; policy = [1.0, 1.1]))   # no tables, so no table format needed
 end
 ```
 
-For libraries that need more than the data in `Config`, a subtype of `OutputVault.AbstractConfig`
-implements `output_root`, and optionally `table_format` and `solution_format`.
+Other tasks keep their configuration. Object files outside runs need no configuration.
 
-## Saving
-
-```julia
-rf = RunHandle("base"; experdef = "v1")
-save_result(rf, (; obj, stv, stats, errstats, simseries, errs, irf, params))   # returns the run's folder
-```
-
-[`save_result`](@ref) saves the properties of the result that [`LAYOUT`](@ref) names. A property that
-the result lacks, or that is `nothing`, is not saved, and properties outside the layout are ignored,
-so one call can be as large or as small as you like:
+## Solutions
 
 ```julia
-save_result(rf, (; obj, stv, stats))               # a new run, without the simulation
-save_result(rf, (; irf))                           # IRFs computed later: added to the run
-save_result(rf, (; claims))                        # a recursion computed later
+save_solution(rf, (; obj, stv))                     # solution/obj.jld2, solution/stv.jld2, native.jld2
+save_solution(rf, (; obj, stv); dirty_repo_check = :error)
 ```
 
-The first save of a run must include `obj` or `stv`. A save without them adds to an existing run,
-replacing objects of the same name, and is an error (`Economy folder ... does not exist`) if the run
-was never saved. A save with `obj` or `stv` replaces the whole run (below).
+[`save_solution`](@ref) writes the new run to a folder under the staging root, renames the old run to
+a temporary name, renames the new one into place and deletes the old one. It returns the run's folder.
+If a rename fails, no run is lost or partly deleted: the new run stays in the staging folder, which
+`save_solution` then returns with a warning that says where the new and the old run are
+([Files held open on Windows](#Files-held-open-on-Windows)).
 
-Each object is written by the package that supports its type: TFI's tables through the table format,
-TFI's solutions in their plain-data layout ([TransitionFunctionIteration Objects](@ref)). Any other
-value, including a Tables.jl table whose type no package supports, is saved with JLD2 as a Julia object.
-
-The keyword `dirty_repo_check` (`:warn`, the default; `:error`; or `:ignore`) controls what a save with
-a solution does when the repository has uncommitted changes. The repository is the one containing
-Julia's working directory; `RunHandle`'s `branch` names the run's folder and does not change it.
-
-### Replacing a run
-
-A save with `obj` or `stv` puts a new run folder in place of the old one, in four steps:
-
-1. it writes the new results to a folder in `staging_root`, `<staging_root>/<branch>/res-<experdef>-<economy>-<time>`;
-2. it renames the existing run folder, if there is one, to `.replaced-res-<experdef>-<economy>-<time>`
-   next to it;
-3. it moves the staged folder to the run's path;
-4. it deletes the renamed old folder.
-
-`save_result` returns the folder holding the new results: the run's path when all goes well. On
-Windows, an open file blocks renaming and deleting its folder, and Parquet2 keeps files it has read
-open until Julia's garbage collector runs, so a load followed closely by a save can make a step fail.
-Then a warning beginning `RESULTS NOT AT THE RUN'S PATH` gives the paths, or, for the last step, a
-warning names the folder that could not be deleted:
-
-| Step that failed | New results | Old results | Run's path |
-|:--|:--|:--|:--|
-| renaming the old folder (2) | staging folder (returned) | at the run's path, unchanged | the old results |
-| moving the staged folder (3); the old folder renamed back | staging folder (returned) | at the run's path, unchanged | the old results |
-| moving the staged folder (3); renaming back failed too | staging folder (returned) | the `.replaced-*` folder | empty |
-| deleting the old folder (4) | at the run's path (returned) | the `.replaced-*` folder, to delete by hand | the new results |
-
-So check the returned path, or watch for the warning, before relying on the run's path. To finish a
-failed replacement, release whatever holds the files (close open files, leave the folder as a working
-directory, run `GC.gc()`), then move the staging folder to the run's path. If a folder is at the run's
-path, move it aside first; do not copy over it, which would mix the two runs. Folders whose names start
-with `.replaced-` are ignored by `find_matching_results` and the DuckDB macros.
-
-Saves without a solution write directly into the run folder, with none of these steps.
-
-## Loading
+The native copy, `native.jld2`, holds each member of the solution NamedTuple under its name:
 
 ```julia
-load(rf, :stats)           # (stats = ...,)       the properties that were saved, in layout order
-load(rf, :solution)        # (obj = ..., stv = ...)  the native copy
-load(rf, :recursions)      # (claims = ..., welfare = ...) whichever exist
+load_result_item(rf, "solution"; native = true)     # (; obj, stv) as Julia objects, read with JLD2
+load_result_item(rf, "solution")                    # stored data; here a NamedTuple of Dicts
+load_result_item(rf, "solution/obj", T; context)    # one part restored as a T
 ```
 
-`load` returns a `NamedTuple` of the saved properties of a component, each restored as its own type.
-It is `FileIO.load` extended; OutputVault re-exports it. For the solution:
+`native = true` bypasses storage hooks and needs the Julia types and compatible code that wrote the
+file. Without it, `.jld2` items still contain Julia objects unless their package defines a portable
+layout. For a solution that is not a NamedTuple, the native loader returns `(solution = value,)`.
+
+## Result items
 
 ```julia
-load(rf, :solution; solution_format = :portable, model = MyModel)    # the portable copy
+save_result_item(rf, "stats/uncond", table)         # a table file
+save_result_item(rf, "irf/ss", (; stats, paths))    # a folder of two tables
+load_result_item(rf, "irf/ss")                      # (; paths = StoredTable, stats = StoredTable)
+load_result_item(rf, "irf/ss", MyIRF; context)      # from_storage(MyIRF, data; context)
+move_result_item(rf, "irf/irf", "irf/ss/stats")     # moved unchanged
+delete_result_item(rf, "irf/old")
 ```
 
-A portable solution stores the model's parameters as plain data. To rebuild the Julia object, `model`
-is either a model instance, whose parameters are compared with the stored ones (a warning lists what
-differs; changes to the model's code are not detected), or a model type, which is rebuilt from the metadata with [`model_from_metadata`](@ref).
-Single files can be read directly, with the same choice of `model`: `load_solution(path, model)` and
-`load_steadystate(path, model)`.
-Moment tables saved by sample load as a `NamedTuple` with the samples in the order they were saved.
+The run must exist, so its solution must have been saved. Moving onto an existing item, or moving or
+deleting the solution or a reserved name, is an error. [`list_run`](@ref) shows what a run holds:
+
+```julia
+c = list_run(rf)
+c.provenance        # (commit = "…", dirty = false)
+c.items             # a column table: path, kind (:table, :jld2, :folder), format
+```
 
 ## Finding runs
 
-```julia
-get_results_folders(["base", "alt"]; experdef = "v1")       # (base = RunHandle, alt = RunHandle)
-find_matching_results("main/res-v1-*")                      # (main__v1__alt = RunHandle, main__v1__base = RunHandle)
-find_matching_results("main/res-v1-*"; key = :economy)      # (alt = RunHandle, base = RunHandle)
-```
-
-[`get_results_folders`](@ref) builds handles for economies you name, in one branch and experdef.
-[`find_matching_results`](@ref) globs the output root and returns the runs whose folders match, in the
-order of their paths. Folders whose names do not parse as `res-<experdef>-<economy>` are skipped.
-
-Each run is named `<branch>__<experdef>__<economy>` (characters other than letters, digits and `_`
-become `_`, so `feature/x` is `feature_x`). `key` picks fewer names: `key = :economy`,
-`key = (:experdef, :economy)` or any other combination of `:branch`, `:experdef` and `:economy`. If two
-runs would get the same name, for example `base` in two branches with `key = :economy`, it is an error
-that lists them: narrow the pattern or use a longer key. [`split_by_economy`](@ref) names runs the same
-way.
-
-## Where things are
+[`find_runs`](@ref) lists runs from folder names alone, so no file is opened or downloaded:
 
 ```julia
-output_path()                       # <output_root>/<current branch> (create=true creates it)
-OutputVault.economy_folder(rf)      # <output_root>/<branch>/res-<experdef>-<economy>
+find_runs()                                              # the runs of top-level branches
+find_runs(RunPattern(branch = "**", experdef = "v1"))    # nested branches too
+find_runs(RunPattern(variant = "frm*"); root = "/other/root")
 ```
+
+A [`RunPattern`](@ref) has one glob per part of a run's name: `*` matches within one level, `?` one
+character, `[...]` one character of a set, and `**` any number of levels.
+
+## Objects outside a run
+
+[`write_object_file`](@ref) and [`read_object_file`](@ref) save and restore one object in a `.jld2`
+file anywhere, through the same JLD2 hooks as items:
+
+```julia
+write_object_file("obj.jld2", obj)
+read_object_file("obj.jld2", T; context)
+```
+
+## Files held open on Windows
+
+A file that is open, or memory-mapped, cannot be renamed or deleted on Windows. Parquet2 keeps the
+files of tables it has read mapped until Julia's garbage collector frees them (`GC.gc()`); a file
+opened by other code, or a shell or Julia session whose working directory is inside the run, also
+holds it. When such a file blocks replacing a run, no run is lost or partly deleted:
+
+- if the old run cannot be renamed aside, it stays where it is, the new run stays in the staging
+  folder, and `save_solution` returns the staging folder with a warning that says where both are;
+- if only the delete of the old run fails, the new run is in place and a warning names the old
+  folder (`.trash-…` next to the run) to delete by hand.

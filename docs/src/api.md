@@ -1,71 +1,82 @@
 # API Reference
 
+```@docs
+OutputVault
+```
+
 ## Runs and configuration
 
 ```@docs
 RunHandle
+RunPattern
+current_branch
+OutputVault.run_path
 Config
-LAYOUT
+OutputVault.AbstractConfig
+OutputVault.output_root
+OutputVault.table_format
+OutputVault.native
+OutputVault.staging_root
 set_config!
 with_config
-output_path
+OutputVault.global_config
 ```
 
 ## Saving and loading
 
 ```@docs
-save_result
-load
 save_solution
-load_solution
-save_steadystate
-load_steadystate
+save_result_item
+load_result_item
+move_result_item
+delete_result_item
+list_run
+OutputVault.RunDisplay
+find_runs
+write_object_file
+read_object_file
 ```
 
-## Finding runs
+## Storage hooks
 
 ```@docs
-find_matching_results
-get_results_folders
+to_storage
+from_storage
+write_portable_jld2
+read_portable_jld2
 ```
 
-## Model hooks
+## Querying
 
 ```@docs
-model_metadata
-model_from_metadata
+QueryShape
+query_results
+vault_connection
+OutputVault.sql_path
+OutputVault.sql_statements
+```
+
+## Globs
+
+```@docs
+OutputVault.matches
+OutputVault.glob_match
+OutputVault.isglob
 ```
 
 ## Table formats
 
 ```@docs
-OutputVault.AbstractTableFormat
 OutputVault.Formats
+OutputVault.Formats.AbstractTableFormat
 OutputVault.Formats.ParquetFormat
-TableFormat
-OutputVault.table_extension
-```
-
-## The producer interface
-
-For extensions that store the types of a package ([Writing an Extension](@ref)).
-
-```@docs
-OutputVault.storage_kind
-OutputVault.write_object
-OutputVault.write_table
-OutputVault.write_table_parts
-OutputVault.jld2_record
-OutputVault.recorded_kind
-OutputVault.read_kind
-```
-
-## DuckDB
-
-```@docs
-duckdb_sql_path
-duckdb_statements
-assemble_moments
-split_by_economy
-OutputVault.momentrows
+OutputVault.Formats.StoredTable
+OutputVault.Formats.extension
+OutputVault.Formats.format_from_extension
+OutputVault.Formats.write_table
+OutputVault.Formats.read_table
+Base.iswritable(::OutputVault.Formats.AbstractTableFormat)
+OutputVault.Formats.RESERVED_PREFIX
+OutputVault.Formats.table_metadata
+OutputVault.Formats.atomic_write
 ```

@@ -1,143 +1,159 @@
 # Quick Start
 
-This page needs only OutputVault. It saves, extends, loads and replaces a run made of plain Julia
-values. A second, optional part stores a type of your own as a Parquet table and queries it with
-DuckDB. For the same steps with a real model, see [A Research Run, Start to Finish](@ref).
+This page saves, adds to, loads, lists and queries runs made of plain Julia values and one type of
+your own, with no model package. For a model package that stores its types through OutputVault, see
+[Frontends](@ref); TransitionFunctionIteration's documentation shows one.
 
-Run the code from inside a git repository: a saved solution records the repository's commit. The output under
-each block is what the code printed when these docs were built.
+Suppose `v1` is a calibration experiment, `base` and `alt` are parameter choices, and each solution
+will eventually have unconditional and conditional statistics. The names of those outputs are
+yours: OutputVault needs no catalogue of them in advance.
+
+Install OutputVault and Parquet2 as shown on the [home page](@ref OutputVault.jl). Run this page's
+blocks in order in a Julia project inside a git repository. The branch and recorded commit come
+from that project's repository. On a detached HEAD or outside a repository, pass `branch = "demo"`
+to both handles below; without a repository, saving warns but works. The output under each block
+is what the code printed when these docs were built in a temporary repository.
 
 ## Configure and name a run
 
 ```@example quickstart
-using OutputVault
+using OutputVault, Parquet2, Tables
 
 root = abspath("../outputs")       # your output folder
-set_config!(Config(output_root = root))
+set_config!(Config(output_root = root,
+                   table_format = OutputVault.Formats.ParquetFormat()))   # tables as Parquet files
 
 rf = RunHandle("base"; experdef = "v1")       # branch: the current git branch
 ```
 
-A run is the saved results of one economy. Its folder is `<root>/<branch>/res-v1-base/`, from the
-three names in the [`RunHandle`](@ref): the git branch, the experiment definition (`experdef`) and the
-economy ([Runs and the Layout](@ref)).
+A run is one folder, `<root>/<branch>/res-v1-base/`, named by the three parts of the
+[`RunHandle`](@ref): the git branch, the experiment definition (`experdef`) and the variant
+([Runs and Storage](@ref)).
+Making the handle creates no files. Repeating this tutorial with the same root and names replaces
+its previous runs; choose another experiment name to keep both versions.
 
 ## Save a solution
 
 ```@example quickstart
-save_result(rf, (; obj   = (α = 0.33, β = 0.96),      # the "solution": any value
-                   stats = (K = 3.5, C = 1.2)))
-readdir(OutputVault.economy_folder(rf))
+save_solution(rf, (; params = (α = 0.33, β = 0.96), policy = [1.0, 1.1, 1.2]))
+list_run(rf)
 ```
 
-`save_result` saves the properties of its argument whose names the layout knows (`obj`, `stats` and
-the others in [`LAYOUT`](@ref)), each in its own folder, and ignores other names. The first save of a
-run must include the solution, `obj` or `stv`: saving other results needs a run that exists.
+The solution starts the run: [`save_solution`](@ref) replaces whatever the run held before. It is
+saved at the path `solution` by the storage rules: a NamedTuple is a folder, and so is the
+NamedTuple `params`; a value that is not a table or a NamedTuple is a `.jld2` file
+(`solution/params/α.jld2`, `solution/policy.jld2`). `.provenance/git_commit.txt`
+holds the commit, and `native.jld2` holds the whole solution as Julia objects, for a fast reload with
+the same code.
 
-OutputVault has no writer of its own for a `NamedTuple`, so these values are saved as Julia objects
-with JLD2 (`stats/stats.jld2`). Reading them back needs Julia and the same types. Packages that
-OutputVault supports, such as TransitionFunctionIteration, store their types as plain arrays and
-Parquet tables instead, which other languages read ([TransitionFunctionIteration Objects](@ref)).
-
-## Add a result later
+## Add results
 
 ```@example quickstart
-save_result(rf, (; irf = (K = [0.0, 0.01],)))
-readdir(OutputVault.economy_folder(rf))
+save_result_item(rf, "stats/uncond", (variable = ["K", "C"], mean = [3.5, 1.2], std = [0.4, 0.1]))
+save_result_item(rf, "stats/boom", (variable = ["K", "C"], mean = [3.9, 1.3], std = [0.3, 0.1]))
+save_result_item(rf, "notes", (; text = "first try", converged = true))
+list_run(rf)
 ```
 
-A save without a solution adds to the run and leaves the solution alone. Saving an object again
-replaces it.
+Each [`save_result_item`](@ref) writes one value at a path chosen when the code runs. A NamedTuple of
+equal-length vectors is a table, saved as a Parquet file; another NamedTuple is a folder; anything
+else is a `.jld2` file. Saving at a path replaces what was there.
+Saving `stats/boom` leaves `stats/uncond` alone; saving a whole `stats` folder replaces all samples.
 
 ## Load
 
 ```@example quickstart
-load(rf, :stats).stats
+stats = load_result_item(rf, "stats/uncond")
+Tables.columns(stats).mean
 ```
 
+The default `.jld2` writer stores a value under the key `"value"`. A folder of such files therefore
+loads as a NamedTuple of Dicts:
+
 ```@example quickstart
-load(rf, :solution).obj
+load_result_item(rf, "notes")
 ```
 
-`load` takes a component (a folder of the run) and returns a `NamedTuple` of the objects saved in it.
-
-## Saving a solution replaces the run
+To resume with the same Julia code, load the native solution:
 
 ```@example quickstart
-save_result(rf, (; obj = (α = 0.33, β = 0.95)))
-readdir(OutputVault.economy_folder(rf))
+saved = load_result_item(rf, "solution"; native = true)
+saved.params.β, saved.policy
 ```
 
-A save that includes `obj` or `stv` writes a new run folder holding only what it contains, then
-puts it in place of the old one and deletes the old one. The statistics and the IRF are gone: nothing
-in a run folder was computed from another solution. Save them again after a new solution.
+Loading returns data: a table as a [`StoredTable`](@ref OutputVault.Formats.StoredTable), a folder
+as a NamedTuple of its items, a `.jld2` file as a Dict. Pass a type to get your own type back
+([Your own type](#Your-own-type)).
 
-`save_result` returns the folder that holds the new results. That is the run's folder, unless the
-swap failed (on Windows, an open file can block it). Then a warning says where the new and the old
-results are, and the return value is the temporary folder holding the new ones
-([Replacing a run](@ref)).
+## Query across runs
 
-## Optional: your own type as a table
-
-To store a type as a table, so that DuckDB, Python or R can read it, tell OutputVault how. Here is a
-table of summary statistics, with one row per variable:
+A second run of the same experiment:
 
 ```@example quickstart
-using Parquet2, Tables
+alt = RunHandle("alt"; experdef = "v1")
+save_solution(alt, (; params = (α = 0.30, β = 0.96)))
+save_result_item(alt, "stats/uncond", (variable = ["K", "C"], mean = [3.1, 1.1], std = [0.5, 0.2]))
+find_runs(RunPattern(experdef = "v1"))
+```
+
+A [`QueryShape`](@ref) describes a family of tables: here every table under `stats/`, with the
+sample name from the file name, rows identified by `variable`, and the other columns (the
+statistics) turned into rows of a column `stat`:
+
+```@example quickstart
+shape = QueryShape("stats/{sample}"; keys = (:variable,), column = :stat)
+query_results(RunPattern(experdef = "v1"), shape; sample = :uncond, stat = :mean)
+```
+
+There are two rows per run, one for `K` and one for `C`. The `sample` column comes from the path,
+`variable` from the table's key column, and `stat` from its column names. Without `stat = :mean`,
+each variable also contributes a row for `std`. Select one key with `variable = :C`, or include
+nested git branches with `RunPattern(branch = "**", experdef = "v1")`.
+
+[`query_results`](@ref) reads only the files of the selected runs and samples, with DuckDB, and
+returns a column table ([Queries](@ref)).
+
+## Saving a solution starts the run over
+
+```@example quickstart
+save_solution(rf, (; params = (α = 0.33, β = 0.95)))
+list_run(rf).items.path
+```
+
+The statistics and notes are gone: nothing in a run was computed from an earlier solution. Save
+them again after a new solution.
+
+## Your own type
+
+A type of your own is stored through two methods. Here is a summary table that keeps a label in the
+file's metadata:
+
+```@example quickstart
+using DataAPI
 
 struct Summary
+    label::String
     variable::Vector{String}
     mean::Vector{Float64}
-    std::Vector{Float64}
 end
 
-# a Tables.jl table
+# a Tables.jl table with a label in its file-level metadata
 Tables.istable(::Type{Summary}) = true
 Tables.columnaccess(::Type{Summary}) = true
-Tables.columns(s::Summary) = (variable = s.variable, mean = s.mean, std = s.std)
+Tables.columns(s::Summary) = (variable = s.variable, mean = s.mean)
+DataAPI.metadatasupport(::Type{Summary}) = (read = true, write = false)
+DataAPI.metadatakeys(::Summary) = ("label",)
+DataAPI.metadata(s::Summary, ::AbstractString; style = false) = s.label
 
-# how OutputVault stores and restores it
-OutputVault.storage_kind(::Summary) = "Demo.Summary"
-OutputVault.write_object(cfg::OutputVault.AbstractConfig, dir, name, s::Summary; provenance = Dict{String,String}()) =
-    OutputVault.write_table(cfg, joinpath(dir, name), s)
-OutputVault.read_kind(::Val{Symbol("Demo.Summary")}, source, path, fmt) =
-    Summary(string.(Tables.getcolumn(source, :variable)),
-            collect(Float64, Tables.getcolumn(source, :mean)), collect(Float64, Tables.getcolumn(source, :std)))
-nothing # hide
+# rebuild it from the data OutputVault reads back
+OutputVault.from_storage(::Type{Summary}, data; context = nothing) =
+    Summary(DataAPI.metadata(data, "label"), Tables.columns(data).variable, Tables.columns(data).mean)
+
+save_result_item(rf, "summary", Summary("baseline", ["K", "C"], [3.4, 1.19]))
+s = load_result_item(rf, "summary", Summary)
+(s.label, s.mean)
 ```
 
-- `storage_kind` is a name recorded in the file. When the file is loaded, it selects the reader.
-- `write_object` writes the object; `write_table` writes any Tables.jl table with the configuration's
-  table format.
-- `read_kind` rebuilds the object from the table read back.
-
-Being a Tables.jl table is not enough by itself: without these methods, a table is saved with JLD2
-like any other value. [Writing an Extension](@ref) has the details.
-
-Tables need a table format in the configuration. Then save a new solution with the table:
-
-```@example quickstart
-set_config!(Config(output_root = root, table_format = OutputVault.Formats.ParquetFormat()))
-
-save_result(rf, (; obj   = (α = 0.33, β = 0.95),
-                   stats = Summary(["K", "C"], [3.4, 1.19], [0.4, 0.1])))
-load(rf, :stats).stats.mean
-```
-
-The table is the file `stats/stats.parquet`. DuckDB reads it in place, from Julia or any other
-language:
-
-```@example quickstart
-using DuckDB
-con = DBInterface.connect(DuckDB.DB)
-foreach(s -> DBInterface.execute(con, s), duckdb_statements())     # load OutputVault's SQL macros
-Tables.columntable(DBInterface.execute(con, """
-    SELECT branch, experdef, economy, variable, stat, value
-    FROM vault_stats('$root', experdef_glob := 'v1') ORDER BY variable, stat"""))
-```
-
-`vault_stats` returns the `stats` tables of the runs under the root in long form, one row per number;
-`experdef_glob := 'v1'` limits it to the runs of experiment `v1`, and without it every run under the
-root is read. It reads Parquet tables with a `variable` column and one column per statistic, which is
-how TransitionFunctionIteration stores its moments and how `Summary` is stored here
-([Querying with DuckDB](@ref)).
+`Summary` is a table, so it is saved as one, with its metadata; `from_storage` turns the table read
+back into a `Summary`. A type that is not a table can define `to_storage` to say what to save
+instead, or `write_portable_jld2` and `read_portable_jld2` for its own layout inside a `.jld2` file ([Frontends](@ref)).

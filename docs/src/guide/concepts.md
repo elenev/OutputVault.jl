@@ -1,113 +1,115 @@
-# Runs and the Layout
+# Runs and Storage
 
-## What a run is
+## Runs
 
-A *run* is the saved results of one economy: one solved model with its simulation and statistics. It
-is identified by three names, held in a [`RunHandle`](@ref):
-
-| Field | Meaning | Default |
-|:--|:--|:--|
-| `branch` | the branch folder the run is saved in, normally the git branch of the code that produced it | the current branch of the working directory |
-| `experdef` | the experiment definition: a named set of economies (calibration, version of the model) | `"default"` |
-| `economy` | the economy within the experiment, e.g. `base` or `alt` | required |
-
-```julia
-rf = RunHandle("base"; experdef = "v1")      # branch: current_branch()
-rf = RunHandle("base"; experdef = "v1", branch = "feature-x")
-```
-
-A run lives in a folder of the project's output root:
+A run is the saved results of one configuration of a model, in one folder:
 
 ```
-<output_root>/<branch>/res-<experdef>-<economy>/
+<output_root>/<branch>/res-<experdef>-<variant>/
+├── native.jld2       the solution as Julia objects (optional)
+├── .provenance/      git_commit.txt  [git_staged.diff  git_unstaged.diff]
+├── solution/ …       the solution, by the storage rules
+└── <result items> …  saved at paths chosen by the caller
 ```
 
-`experdef` must not contain `-`, because readers split the folder name at the first hyphen after
-`res-`; `economy` may contain anything (including hyphens). A branch with a `/` (`feature/x`) is a
-nested folder. The names can be anything else: OutputVault imposes no convention on economy names, and
-the DuckDB macros can split them into parts with a regular expression
-([Querying with DuckDB](@ref)).
+| Part | Meaning |
+|:--|:--|
+| output root | the top folder of a project's runs (`Config(; output_root)`) |
+| branch | the git branch the run belongs to; may contain `/`, which gives nested folders |
+| experdef | the experiment definition: a set of runs designed together |
+| variant | one configuration within an experdef |
 
-When OutputVault returns several runs at once, it names each one by all three names,
-`<branch>__<experdef>__<economy>`, unless you ask for a shorter name (`key = :economy`); a shorter name
-that two runs would share is an error ([`find_matching_results`](@ref)).
+A [`RunHandle`](@ref) names a run. Its names are checked when it is made: the variant uses only
+`A–Z`, `a–z`, `0–9` and `_ . + = -`, which is safe on every operating system and in shell commands;
+the experdef uses the same characters without `-`, so the folder name splits at its first hyphen; no
+level of the branch starts with `res-` or `.`. The branch defaults to the git branch of the active
+project's repository ([`current_branch`](@ref)).
 
-## Components and objects
+The branch and the git record ([Provenance](@ref)) come from the repository of the active project,
+not from the working directory, so they belong to the code that ran even when Julia was started
+elsewhere. (OutputVault 0.3 used the working directory.) When the active project is not in a git
+repository, or on a detached HEAD, `RunHandle` needs `branch`: for example with the global
+environment active, or under `Pkg.test`, whose active project is a temporary environment. Tests either pass `branch` or create a
+throwaway repository and activate its project.
 
-Inside the run folder, results are grouped into *components*, one folder each, with one file per
-*object* (property). Where each object goes is fixed for every project and every user of
-OutputVault, so that tools can find an object in any run. [`LAYOUT`](@ref) is the table:
+A handle only identifies a run; it creates no files. Changing the active configuration changes
+which output root that same handle refers to. Passing `branch` chooses a folder and does not switch
+git branches or change the source of provenance.
 
-| Component | Objects | Holds |
-|:--|:--|:--|
-| `solution` | `obj`, `stv` | the solved model and its steady state; the git commit and diffs |
-| `stats` | `stats` | moments of the simulation; one table per sample, `stats/<sample>.<ext>` |
-| `errstats` | `errstats` | equation-error statistics |
-| `simulation` | `simseries`, `errs` | the simulated panel and its equation errors |
-| `irf` | `irf` | impulse responses (statistics and raw paths) |
-| `params` | `params` | the model's scalar parameters |
-| `recursions` | `claims`, `welfare` | interpolants computed at the solution's policies |
+A run starts with its solution. [`save_solution`](@ref) replaces the whole run, so a run never mixes
+results computed from two solutions. Result items are then saved with
+[`save_result_item`](@ref), at any time and in any order, at paths chosen when the code runs.
+OutputVault fixes no layout of possible outputs: it fixes only the grammar above and the reserved
+top-level names `solution` and `native` (`.provenance` cannot be an item path, since names have no `.`).
 
-A TFI run saved with the Parquet table format looks like this:
+## Paths
 
-```
-res-v1-base/
-├── solution/     obj.jld2  stv.jld2  res.jld2  git_commit.txt  [git_staged.diff  git_unstaged.diff]
-├── stats/        uncond.parquet
-├── errstats/     errstats.parquet
-├── simulation/   simseries.parquet  errs.parquet
-├── irf/          irf.parquet  irf_paths.parquet
-├── params/       params.parquet
-└── recursions/   claims.jld2  welfare.jld2
-```
+An item's path is relative to the run folder, with levels separated by `/` (`"stats"`,
+`"irf/ss/stats"`). Each level is a nonempty file name without `/`, `\` or `.`. The file extension is
+added by the storage rules.
 
-Which objects a run has is the caller's choice: each [`save_result`](@ref) saves the objects it is
-given, so a run can be built in steps (the recursions are often computed after the simulation).
+## Storage rules
 
-## One folder, one solution
+OutputVault writes a value `v` at path `p` as follows.
 
-The `solution` component is special: everything in a run folder was computed from the solution in it.
-A save that includes `obj` or `stv` therefore makes a new run folder:
+1. It computes `s = to_storage(v)` ([`to_storage`](@ref); `v` itself unless a package says
+   otherwise).
+2. If `s` is a table, it writes one table file `p.<ext>` with the configured table format and the
+   table's own file-level metadata (`DataAPI.metadata`). A NamedTuple of equal-length vectors is a
+   table; a NamedTuple of vectors of unequal lengths is an error naming the path. Writing a table
+   without a table format in the configuration is an error.
+3. Else, if `s` is a NamedTuple, it writes a folder `p/`, with each member `m` at `p/m` by these same
+   rules, `to_storage` included.
+4. Otherwise it writes `p.jld2` with [`write_portable_jld2`](@ref): the Julia object, unless the type's
+   package defines its own layout.
 
-1. the new results are written to a temporary folder (`staging_root` of the configuration);
-2. the existing run folder, if any, is renamed aside;
-3. the new folder is moved to the run's path;
-4. the renamed old folder is deleted.
+Saving at a path replaces what is there, in every form (`p.<ext>`, `p.jld2`, `p/`), so saving
+`stats` replaces the whole folder, including samples saved separately as `stats/boom`; to add one
+sample, save `stats/boom`. Saving below an item that is a file (`irf/tfp` when `irf.jld2` exists) is an
+error. Each item is written to a temporary name next to it and then renamed into place, so readers
+never see half an item. The old item is renamed aside first and deleted last, so a save that fails
+leaves it as it was. On Windows, an old copy holding a file that is still open cannot be deleted: it
+stays beside the new item under a hidden name, and a warning names it.
 
-So the old results disappear only once the new ones are in place, and all of them go: a save of `stv`
-alone also removes the saved `obj`. If a step fails, `save_result` warns and says where each folder is
-([Replacing a run](@ref)).
+## Reading returns data
 
-Saves without `obj` or `stv` add to the run folder, replacing objects of the same name, and need the
-run to exist. Stale simulations and diffs next to a new solution are the usual way to mislead yourself
-about which results belong to which code, which is why there is no way to add to a run across solutions.
+OutputVault returns the following data when no type is supplied:
+
+- a table file is a [`StoredTable`](@ref OutputVault.Formats.StoredTable), its columns with the
+  file's metadata;
+- a folder is a NamedTuple of its items, in alphabetical order;
+- a `.jld2` file is a Dict of its contents.
+
+The type used for a frontend conversion always comes from the caller. JLD2 itself can reconstruct
+Julia objects stored in a file; an ordinary `.jld2` item is therefore not automatically portable
+across languages or code versions. A frontend can define a plain-data layout for it.
+
+Turning data into a package's types is driven by the type the caller passes:
+`load_result_item(rf, path, T)` calls `from_storage(T, data)` for a table or a folder and
+`read_portable_jld2(T, io)` for a `.jld2` file ([Frontends](@ref)). `from_storage` sees only the item's own data,
+so values that are only meaningful together belong in one item.
 
 ## Provenance
 
-The solution folder records the code:
+`save_solution` records the git state of the repository of the active project
+(`Base.active_project()`), whatever the working directory, in `.provenance/`:
 
-- `git_commit.txt`: the commit id of the git repository containing the working directory of the
-  Julia process (not the repository of the output root, and not chosen by `RunHandle`'s `branch`);
-- if the repository is dirty, `git_staged.diff` and `git_unstaged.diff` (the latter including
-  untracked files), unless a diff exceeds 1 MB. The diffs are computed without touching the
-  repository's index.
+- `git_commit.txt`: the commit, and one line `submodule <path> <commit>` per submodule;
+- if the repository is dirty, `git_staged.diff` and `git_unstaged.diff`. The unstaged diff includes
+  untracked text files, up to 1 MB in total (one line in the diff says when the rest was left out);
+  binary files are skipped. Submodules contribute their commits, not their diffs.
 
-[`save_result`](@ref) warns about a dirty repository by default, or fails with
-`dirty_repo_check = :error`. TFI's simulations and IRFs record in their own metadata the id of the
-solution they were computed from, so a simulation can be traced to its solution.
+`dirty_repo_check` (`:warn`, `:error` or `:ignore`) says what to do when the repository is dirty or
+when there is no repository (then `git_commit.txt` says so). The repository's index is never written.
+Result items record no provenance: they belong to the solution of their run.
 
-## Two copies of the solution
+OutputVault does not lock runs. Coordinate writers to the same run yourself; separate runs can be
+written independently. Commit the project's `Manifest.toml` when the recorded commit should also
+identify the package versions used.
 
-The solution is saved twice by default (`solution_format = (:portable, :native)`):
+## Runs saved with OutputVault 0.3
 
-- **portable**: one file per object (`obj.jld2`, `stv.jld2`), each written by the package that
-  supports the object's type. For TransitionFunctionIteration this is a documented layout of plain
-  arrays and metadata that h5py and other HDF5 readers can open, and that loads into a rebuilt model
-  ([TransitionFunctionIteration Objects](@ref)). It is the copy for long-term storage. An object of a
-  type no package supports is saved with JLD2 as a Julia object, in this copy as everywhere else.
-- **native**: `res.jld2`, all solution objects as Julia saved them. Quick to load, but it needs code
-  compatible with the code that wrote it, so it is meant for work done soon after the solve.
-
-The other components have one copy, saved like the portable one: one file per object, written by the
-package that supports its type (TFI's tables go through the configured [table format](@ref "Table Formats")),
-or with JLD2 for any other value.
+Runs saved with OutputVault 0.3 load without changes. Their provenance is in `solution/` and their
+native copy is `solution/res.jld2`: `load_result_item(rf, "solution"; native = true)` reads it there,
+and reading `solution` skips it. Their other items are at the same paths as before. Runs saved with
+OutputVault 0.1 are not supported.

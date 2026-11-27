@@ -1,11 +1,13 @@
 using Documenter
 using OutputVault
-# the extensions' packages, so that their methods are loaded when the docs are built
-using Parquet2, DuckDB, Tables, StaticArrays, StructArrays, TransitionFunctionIteration
+# the extension's package, so that its methods are loaded when the docs are built
+using Parquet2, Tables, DataAPI
 
-# the walkthrough pages run their code in a throwaway git repository (see walkthroughs.jl)
+# the walkthrough pages run their code in a throwaway git repository, made the active project so
+# that saved solutions record its commit (see walkthroughs.jl)
 include("walkthroughs.jl")
 const WORKDIR = walkthrough_repo()
+activate_walkthrough(WORKDIR)
 
 makedocs(
     sitename = "OutputVault.jl",
@@ -15,13 +17,11 @@ makedocs(
         "Home" => "index.md",
         "Guide" => [
             "guide/quickstart.md",
-            "guide/lifecycle.md",
             "guide/concepts.md",
             "guide/saving_loading.md",
-            "guide/tfi.md",
+            "guide/frontends.md",
             "guide/tables.md",
-            "guide/duckdb.md",
-            "guide/extending.md",
+            "guide/queries.md",
         ],
         "API Reference" => "api.md",
     ],

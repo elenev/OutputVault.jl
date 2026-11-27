@@ -1,103 +1,87 @@
-@testset "git" begin
-    @testset "current_branch and is_repo_clean" begin
-        git_dir = make_git_repo()
-        cd(git_dir) do
-            branch = OutputVault.current_branch()
-            @test branch isa String
-            @test !isempty(branch)
+provenance_file(root, rf, f) = joinpath(OutputVault.run_path(root, rf), ".provenance", f)
 
-            @test OutputVault.is_repo_clean() == true
+@testset "provenance" begin
+    rf = RunHandle("base"; branch = "main", experdef = "v1")
 
-            # write untracked file → dirty
-            write(joinpath(git_dir, "dirty.txt"), "x")
-            @test OutputVault.is_repo_clean() == false
+    @testset "clean repository" begin
+        with_vault() do root, repo
+            save_solution(rf, (; x = 1))
+            commit = strip(git(repo, "rev-parse", "HEAD"))
+            @test readlines(provenance_file(root, rf, "git_commit.txt")) == [commit]
+            @test !isfile(provenance_file(root, rf, "git_staged.diff"))
+            @test !isfile(provenance_file(root, rf, "git_unstaged.diff"))
+            @test list_run(rf).provenance == (commit = commit, dirty = false)
         end
     end
 
-    @testset "from a subfolder of the repository" begin
-        git_dir = make_git_repo()
-        sub = mkpath(joinpath(git_dir, "code", "pkg"))
-        write(joinpath(git_dir, "top_untracked.txt"), "x")
-        cd(sub) do
-            @test OutputVault.current_branch() isa String
-            commit_id, diffs = OutputVault.get_commit_id(:ignore)
-            @test occursin(r"^[0-9a-f]{40}$", commit_id)
-            @test occursin("top_untracked.txt", diffs.unstaged)    # untracked files repository-wide
+    @testset "dirty repository" begin
+        with_vault() do root, repo
+            write(joinpath(repo, "Project.toml"), "name = \"Changed\"\n")
+            write(joinpath(repo, "staged.txt"), "staged\n")
+            git(repo, "add", "staged.txt")
+            write(joinpath(repo, "new.jl"), "x = 1\ny = 2")
+            mkpath(joinpath(repo, "sub"))
+            write(joinpath(repo, "sub", "data.bin"), UInt8[0x01, 0x00, 0x02])
+            index_before = read(joinpath(repo, ".git", "index"))
+            @test_logs (:warn, r"uncommitted changes") match_mode = :any save_solution(rf, (; x = 1))
+            @test read(joinpath(repo, ".git", "index")) == index_before     # the index is not touched
+            staged = read(provenance_file(root, rf, "git_staged.diff"), String)
+            unstaged = read(provenance_file(root, rf, "git_unstaged.diff"), String)
+            @test occursin("+staged", staged) && !occursin("Changed", staged)
+            @test occursin("+name = \"Changed\"", unstaged)
+            @test occursin("+++ b/new.jl", unstaged) && occursin("+y = 2", unstaged) &&
+                  occursin("No newline at end of file", unstaged)
+            @test !occursin("data.bin", unstaged)                         # binary files are skipped
+            @test list_run(rf).provenance.dirty
+
+            @test_throws ErrorException save_solution(rf, (; x = 2); dirty_repo_check = :error)
+            @test load_result_item(rf, "solution/x")["value"] == 1           # the run is unchanged
+            @test_logs save_solution(rf, (; x = 3); dirty_repo_check = :ignore)
+            @test_throws ArgumentError save_solution(rf, (; x = 4); dirty_repo_check = :maybe)
         end
     end
 
-    @testset "get_commit_id clean repo" begin
-        git_dir = make_git_repo()
-        cd(git_dir) do
-            commit_id, diffs = OutputVault.get_commit_id(:ignore)
-            @test occursin(r"^[0-9a-f]{40}$", commit_id)
-            @test diffs.staged   == ""
-            @test diffs.unstaged == ""
+    @testset "untracked files are truncated at 1 MB" begin
+        with_vault() do root, repo
+            write(joinpath(repo, "a.txt"), "a\n" ^ 300_000)
+            write(joinpath(repo, "b.txt"), "b\n" ^ 300_000)
+            save_solution(rf, (; x = 1); dirty_repo_check = :ignore)
+            unstaged = read(provenance_file(root, rf, "git_unstaged.diff"), String)
+            @test occursin("+++ b/a.txt", unstaged) && !occursin("+++ b/b.txt", unstaged)
+            @test occursin("untracked files truncated", unstaged)
         end
     end
 
-    @testset "get_commit_id dirty repo" begin
-        # use separate repo per subtest to avoid index contamination
-        @testset ":warn warns and returns commit_id" begin
-            git_dir = make_git_repo()
-            cd(git_dir) do
-                write(joinpath(git_dir, "dirty.txt"), "x")
-                commit_id = nothing
-                @test_logs (:warn, r"not clean") match_mode=:any begin
-                    commit_id, _ = OutputVault.get_commit_id(:warn)
+    @testset "submodules" begin
+        with_vault() do root, repo
+            sub = make_git_repo()
+            try
+                git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", sub, "lib")
+                git(repo, "commit", "-q", "-m", "add submodule")
+                write(joinpath(repo, "lib", "Project.toml"), "dirty inside the submodule")
+                save_solution(rf, (; x = 1))
+                lines = readlines(provenance_file(root, rf, "git_commit.txt"))
+                @test lines[2] == "submodule lib $(strip(git(sub, "rev-parse", "HEAD")))"
+                @test !isfile(provenance_file(root, rf, "git_unstaged.diff"))   # not its diffs
+            finally
+                rm(sub; recursive = true, force = true)
+            end
+        end
+    end
+
+    @testset "no repository" begin
+        with_tempdir() do dir
+            write(joinpath(dir, "Project.toml"), "")
+            with_tempdir() do root
+                with_config(Config(; output_root = root)) do
+                    with_project(dir) do
+                        @test_logs (:warn, r"not in a git repository") save_solution(rf, (; x = 1))
+                        @test occursin("no git repository", read(provenance_file(root, rf, "git_commit.txt"), String))
+                        @test isnothing(list_run(rf).provenance.commit)
+                        @test_throws ErrorException save_solution(rf, (; x = 1); dirty_repo_check = :error)
+                        @test_logs save_solution(rf, (; x = 1); dirty_repo_check = :ignore)
+                    end
                 end
-                @test occursin(r"^[0-9a-f]{40}$", commit_id)
-            end
-        end
-
-        @testset ":error throws" begin
-            git_dir = make_git_repo()
-            cd(git_dir) do
-                write(joinpath(git_dir, "dirty.txt"), "x")
-                @test_throws ErrorException OutputVault.get_commit_id(:error)
-            end
-        end
-
-        @testset ":ignore returns commit_id and captures diffs" begin
-            git_dir = make_git_repo()
-            cd(git_dir) do
-                write(joinpath(git_dir, "newfile.txt"), "content")
-                commit_id, diffs = OutputVault.get_commit_id(:ignore)
-                @test occursin(r"^[0-9a-f]{40}$", commit_id)
-                # at least one diff should mention the new file
-                @test occursin("newfile.txt", diffs.staged) ||
-                      occursin("newfile.txt", diffs.unstaged)
-            end
-        end
-
-        @testset "staged changes stay staged; untracked files are in the unstaged diff" begin
-            git_dir = make_git_repo()
-            cd(git_dir) do
-                write(joinpath(git_dir, "staged.txt"), "s")
-                run(`git -C $git_dir add staged.txt`)
-                write(joinpath(git_dir, "untracked.txt"), "u")
-                staged_before = read(`git -C $git_dir diff --staged --name-only`, String)
-                _, diffs = OutputVault.get_commit_id(:ignore)
-                @test read(`git -C $git_dir diff --staged --name-only`, String) == staged_before
-                @test occursin("staged.txt", diffs.staged)
-                @test occursin("untracked.txt", diffs.unstaged)
-                # untracked file not marked in the repository's index
-                @test !occursin("untracked.txt", read(`git -C $git_dir diff --name-only`, String))
-            end
-        end
-
-        @testset "index is restored after get_commit_id" begin
-            git_dir = make_git_repo()
-            cd(git_dir) do
-                write(joinpath(git_dir, "newfile.txt"), "content")
-                # repo is dirty before
-                @test !OutputVault.is_repo_clean()
-                OutputVault.get_commit_id(:ignore)
-                # still dirty (untracked file remains), but no extra staged files
-                @test !OutputVault.is_repo_clean()
-                # verify nothing got accidentally staged: run git diff --staged
-                staged = read(`git -C $git_dir diff --staged`, String)
-                @test isempty(staged)
             end
         end
     end
