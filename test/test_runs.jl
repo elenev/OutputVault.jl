@@ -6,6 +6,7 @@
     @test RunHandle(7; branch = "main").variant == "7"
     @test RunHandle("x"; branch = "main").experdef == "default"
     @test RunHandle("frm-grid_a.1+b=2"; branch = "feature/x", experdef = "e.1").variant == "frm-grid_a.1+b=2"
+    @test repr(rf) == "RunHandle(branch = \"main\", experdef = \"v1\", variant = \"base\")"
 
     @test_throws ArgumentError RunHandle("x"; branch = "main", experdef = "high-risk")
     @test_throws ArgumentError RunHandle("a b"; branch = "main")

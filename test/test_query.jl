@@ -4,6 +4,10 @@ const DBI = DuckDB.DBInterface
 # rows of a column table as tuples, for comparisons
 rowset(t) = collect(zip(values(t)...))
 
+# a format whose files are found like Parquet files, but that queries do not read
+struct UnqueryableFormat <: OutputVault.Formats.AbstractTableFormat end
+OutputVault.Formats.extension(::UnqueryableFormat) = "parquet"
+
 @testset "queries" begin
     base = RunHandle("base"; branch = "main", experdef = "v1")
     alt = RunHandle("alt"; branch = "main", experdef = "v1")
@@ -51,6 +55,9 @@ rowset(t) = collect(zip(values(t)...))
             @test isempty(query_results([base], stats; stat = :absent).value)
             @test isempty(query_results([RunHandle("unsaved"; branch = "main", experdef = "v1")], stats).value)   # no run folder
             @test_throws ArgumentError with_config(() -> query_results([base], stats), Config(; output_root = root))  # no table format
+            unqueryable = Config(; output_root = root, table_format = UnqueryableFormat())
+            err = try with_config(() -> query_results([base], stats), unqueryable); nothing catch e; e end
+            @test err isa ArgumentError && occursin("do not support the table format", err.msg)
             err = try query_results([base], stats; shock = :tfp); nothing catch e; e end
             @test err isa ArgumentError && occursin("sample, variable, stat", err.msg)
         end

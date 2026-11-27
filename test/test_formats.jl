@@ -59,6 +59,15 @@ OutputVault.Formats.format_package(::Type{UnloadedFormat}) = "SomeIOPackage"
         end
     end
 
+    @testset "StoredTable interface" begin
+        t = StoredTable((a = [1],), Dict("k" => "v"))
+        @test Tables.istable(typeof(t)) && Tables.columnaccess(typeof(t))
+        @test DataAPI.metadatasupport(typeof(t)) == (read = true, write = false)
+        @test t == StoredTable((a = [1],), Dict("k" => "v"))
+        @test t != StoredTable((a = [2],), Dict("k" => "v"))
+        @test t != StoredTable((a = [1],), Dict{String,String}())
+    end
+
     @testset "unsupported columns and reserved metadata" begin
         with_tempdir() do dir
             path = joinpath(dir, "u.parquet")
