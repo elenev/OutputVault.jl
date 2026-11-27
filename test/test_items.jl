@@ -137,8 +137,10 @@ files_under(dir) = sort([relpath(joinpath(r, f), dir) for (r, _, fs) in walkdir(
             move_result_item(rf, "irf/ss", "irfs")
             @test keys(load_result_item(rf, "irfs")) == (:paths, :stats)
 
+            GC.gc(); GC.gc()      # Windows keeps the Parquet files just read open until collection
             delete_result_item(rf, "irfs/paths")
             @test keys(load_result_item(rf, "irfs")) == (:stats,)
+            GC.gc(); GC.gc()
             delete_result_item(rf, "irfs")
             @test !isdir(joinpath(dir, "irfs"))
             @test_throws ArgumentError delete_result_item(rf, "irfs")

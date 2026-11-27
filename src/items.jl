@@ -64,13 +64,15 @@ end
 # On Windows, open or memory-mapped files can block a rename or a delete. Whatever fails, no run is
 # lost or partly deleted: `final` holds the new run or the intact old one, and a warning says where
 # both are. Returns the folder holding the new run.
+# Folders are moved with Base.rename: when a rename fails, mv copies the folder and then deletes the
+# original, which removes part of it before stopping at a locked file.
 function replace_run(stage, final)
     parent = mkpath(dirname(final))
     trash = joinpath(parent, ".trash-" * basename(final) * "-" * randstring(8))
     had_old = isdir(final)
     if had_old
         try
-            mv(final, trash)
+            Base.rename(final, trash)
         catch err
             return stranded(stage, final, "the existing run cannot be renamed", err)
         end
@@ -80,7 +82,7 @@ function replace_run(stage, final)
     catch err
         if had_old
             try
-                mv(trash, final)
+                Base.rename(trash, final)
             catch err2
                 return stranded(stage, final, "the new run cannot be moved into place and the old one cannot be restored", err2; trash)
             end
@@ -110,7 +112,7 @@ end
 # rename, or copy when the staging root is on another file system
 function move_folder(src, dst)
     try
-        mv(src, dst)
+        Base.rename(src, dst)
     catch
         if ispath(dst) || !isdir(src)
             rethrow()
@@ -198,7 +200,8 @@ end
 
 Move the item at path `from` to path `to` within the run, unchanged. An error if nothing is at
 `from` or something is at `to`. Neither may be under a reserved name (`solution`,
-`native`).
+`native`). On Windows, a Parquet file stays open after it is read until garbage collection
+(`GC.gc()`), and moving it, or a folder holding it, can fail.
 """
 function move_result_item(rf::RunHandle, from, to)
     src, dst = writable_levels(from), writable_levels(to)
@@ -210,7 +213,7 @@ function move_result_item(rf::RunHandle, from, to)
     check_parents(dir, dst, string(to))
     suffix = isdir(p) ? "" : "." * file_extension(basename(p))
     target = joinpath(mkpath(joinpath(dir, dst[1:end-1]...)), dst[end] * suffix)
-    mv(p, target)
+    Base.rename(p, target)
     return target
 end
 
@@ -218,7 +221,8 @@ end
     delete_result_item(rf::RunHandle, path)
 
 Remove the item at `path`, in every form. An error if there is none, and for the solution and the
-reserved names.
+reserved names. On Windows, a Parquet file stays open after it is read until garbage collection
+(`GC.gc()`), and deleting it fails; a folder holding it may then be removed only in part.
 """
 function delete_result_item(rf::RunHandle, path)
     levels = writable_levels(path)
@@ -286,7 +290,7 @@ function read_provenance(dir)
         p = joinpath(dir, SOLUTION)
     end
     file = joinpath(p, "git_commit.txt")
-    line = isfile(file) ? strip(first(eachline(file))) : ""
+    line = isfile(file) ? strip(readline(file)) : ""
     commit = occursin(r"^[0-9a-f]{40}$", line) ? String(line) : nothing
     dirty = isfile(joinpath(p, "git_staged.diff")) || isfile(joinpath(p, "git_unstaged.diff"))
     return (; commit, dirty)
