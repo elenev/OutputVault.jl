@@ -18,6 +18,10 @@ QueryShape(path_pattern; keys = (), column = :column, valuetype = Float64)
 - The table's other columns become rows: their names go in the output column `column`, their cells
   in `value`, cast to `valuetype`.
 
+`valuetype` may be `Float64` (the default), `Float32`, `Int64`, `Int32`, `Bool` or `String`. All output
+column names must be distinct, including the run columns and `value`. Paths omit extensions;
+each placeholder occupies a whole level. A fixed path such as `"params/params"` needs no placeholder.
+
 Take the statistics table `stats/uncond.parquet` of a run:
 
 ```
@@ -43,8 +47,17 @@ Rows are ordered by run, placeholder values, row of the file and column of the t
 ## Selections
 
 ```julia
+shape = QueryShape("stats/{sample}"; keys = (:variable,), column = :stat)
 query_results(RunPattern(experdef = "v1"), shape; sample = [:uncond, :boom], variable = "r_*", stat = :mean)
-query_results([rf1, rf2], irfshape; start = :ss, __period = [1, 2])
+```
+
+For TFI's IRF table layout, where rows are identified by shock, statistic and period:
+
+```julia
+irfshape = QueryShape("irf/{start}/stats";
+                     keys = (:__shock, :__stat, :__period), column = :variable)
+query_results(RunPattern(experdef = "v1"), irfshape;
+              start = :ss, __shock = :shock_5, __stat = :mean, __period = [2, 3], variable = :C)
 ```
 
 The first argument is a [`RunPattern`](@ref) or a collection of [`RunHandle`](@ref)s. Each keyword
@@ -86,10 +99,16 @@ all runs of experiment `v1`:
 import duckdb, pathlib
 root = pathlib.Path("/path/to/outputs")
 files = [str(f) for f in root.glob("**/res-v1-*/stats/*.parquet")]
+files = [f for f in files if not any(p.startswith(".") for p in pathlib.Path(f).relative_to(root).parts)]
 con = duckdb.connect()
-con.execute(open("/path/to/outputvault.sql").read())
-con.sql(f"SELECT * FROM vault_table_parquet({files})")
+con.execute(pathlib.Path("/path/to/outputvault.sql").read_text())  # file at OutputVault.sql_path() in Julia
+if files:
+    rows = con.execute("SELECT * FROM vault_table_parquet(?)", [files]).fetchall()
 ```
+
+These macros return the stored columns plus `__file` and `__row`; unlike Julia's `query_results`,
+they do not add run labels or turn the cells into long form. The example skips hidden staging and
+trash folders. Find the files before querying, so DuckDB opens only the selected ones.
 
 The variant follows no naming convention of OutputVault's; `vault_split_variant` applies the
 project's, e.g. `UNNEST(vault_split_variant(variant, '^([a-z]+)(\d*)$', ['scheme', 'level']))` splits

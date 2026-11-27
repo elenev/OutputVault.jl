@@ -2,11 +2,13 @@
 
 ## Configuration
 
-Every OutputVault function uses the active configuration, set once with [`set_config!`](@ref) (a
+Run storage and queries use the active configuration, set once with [`set_config!`](@ref) (a
 project package typically calls it in its `__init__`) or for a block of code with
 [`with_config`](@ref):
 
 ```julia
+using OutputVault, Parquet2
+
 set_config!(Config(output_root = "/path/to/outputs",
                    table_format = OutputVault.Formats.ParquetFormat(),   # needed only to write tables
                    native = true))                                       # also write native.jld2
@@ -15,6 +17,17 @@ set_config!(Config(output_root = "/path/to/outputs",
 `staging_root` (default `<output_root>/.staging`) is where a solution's run is written before it is
 renamed into place; it must be on the same file system as the runs. A project that computes its
 settings (the root from the machine, say) defines a subtype of [`OutputVault.AbstractConfig`](@ref) instead.
+
+For a temporary override, including tasks started inside the block:
+
+```julia
+with_config(Config(output_root = mktempdir())) do
+    trial = RunHandle("trial"; branch = "scratch")
+    save_solution(trial, (; policy = [1.0, 1.1]))   # no tables, so no table format needed
+end
+```
+
+Other tasks keep their configuration. Object files outside runs need no configuration.
 
 ## Solutions
 
@@ -33,9 +46,13 @@ The native copy, `native.jld2`, holds each member of the solution NamedTuple und
 
 ```julia
 load_result_item(rf, "solution"; native = true)     # (; obj, stv) as Julia objects, read with JLD2
-load_result_item(rf, "solution")                    # the portable files: a NamedTuple of Dicts
+load_result_item(rf, "solution")                    # stored data; here a NamedTuple of Dicts
 load_result_item(rf, "solution/obj", T; context)    # one part restored as a T
 ```
+
+`native = true` bypasses storage hooks and needs the Julia types and compatible code that wrote the
+file. Without it, `.jld2` items still contain Julia objects unless their package defines a portable
+layout. For a solution that is not a NamedTuple, the native loader returns `(solution = value,)`.
 
 ## Result items
 

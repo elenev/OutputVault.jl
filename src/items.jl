@@ -149,8 +149,11 @@ Without a type, its data: a table file as a [`StoredTable`](@ref Formats.StoredT
 file metadata), a folder as a NamedTuple of its items in alphabetical order, and
 a `.jld2` file as a Dict of its contents.
 
-With a type `T`, the item restored as a `T`: `read_portable_jld2(T, io; context)` for a `.jld2` file, and
+With a type `T`, the item read by `read_portable_jld2(T, io; context)` for a `.jld2` file, and
 otherwise `from_storage(T, data; context)` of its data.
+The default JLD2 reader returns `io["value"]` without checking its type; a custom reader can
+validate or rebuild it. Even without a type argument, JLD2 reconstructs Julia objects stored in
+the file; only a custom plain-data layout avoids dependence on their original Julia types.
 
 `load_result_item(rf, "solution"; native = true)` reads the native copy (`native.jld2`, or
 `solution/res.jld2` in runs saved with OutputVault 0.3) with JLD2 alone, and returns a NamedTuple

@@ -28,9 +28,13 @@ project's repository ([`current_branch`](@ref)).
 The branch and the git record ([Provenance](@ref)) come from the repository of the active project,
 not from the working directory, so they belong to the code that ran even when Julia was started
 elsewhere. (OutputVault 0.3 used the working directory.) When the active project is not in a git
-repository, `RunHandle` needs `branch`: for example with the global environment active, or under
-`Pkg.test`, whose active project is a temporary environment. Tests either pass `branch` or create a
+repository, or on a detached HEAD, `RunHandle` needs `branch`: for example with the global
+environment active, or under `Pkg.test`, whose active project is a temporary environment. Tests either pass `branch` or create a
 throwaway repository and activate its project.
+
+A handle only identifies a run; it creates no files. Changing the active configuration changes
+which output root that same handle refers to. Passing `branch` chooses a folder and does not switch
+git branches or change the source of provenance.
 
 A run starts with its solution. [`save_solution`](@ref) replaces the whole run, so a run never mixes
 results computed from two solutions. Result items are then saved with
@@ -59,7 +63,7 @@ OutputVault writes a value `v` at path `p` as follows.
 4. Otherwise it writes `p.jld2` with [`write_portable_jld2`](@ref): the Julia object, unless the type's
    package defines its own layout.
 
-Saving at a path first removes what is there, in every form (`p.<ext>`, `p.jld2`, `p/`), so saving
+Saving at a path replaces what is there, in every form (`p.<ext>`, `p.jld2`, `p/`), so saving
 `stats` replaces the whole folder, including samples saved separately as `stats/boom`; to add one
 sample, save `stats/boom`. Saving below an item that is a file (`irf/tfp` when `irf.jld2` exists) is an
 error. Each item is written to a temporary name next to it and then renamed into place, so readers
@@ -67,12 +71,16 @@ never see half an item.
 
 ## Reading returns data
 
-OutputVault reads data and never lets a file choose the code that reads it:
+OutputVault returns the following data when no type is supplied:
 
 - a table file is a [`StoredTable`](@ref OutputVault.Formats.StoredTable), its columns with the
   file's metadata;
 - a folder is a NamedTuple of its items, in alphabetical order;
 - a `.jld2` file is a Dict of its contents.
+
+The type used for a frontend conversion always comes from the caller. JLD2 itself can reconstruct
+Julia objects stored in a file; an ordinary `.jld2` item is therefore not automatically portable
+across languages or code versions. A frontend can define a plain-data layout for it.
 
 Turning data into a package's types is driven by the type the caller passes:
 `load_result_item(rf, path, T)` calls `from_storage(T, data)` for a table or a folder and
@@ -92,6 +100,10 @@ so values that are only meaningful together belong in one item.
 `dirty_repo_check` (`:warn`, `:error` or `:ignore`) says what to do when the repository is dirty or
 when there is no repository (then `git_commit.txt` says so). The repository's index is never written.
 Result items record no provenance: they belong to the solution of their run.
+
+OutputVault does not lock runs. Coordinate writers to the same run yourself; separate runs can be
+written independently. Commit the project's `Manifest.toml` when the recorded commit should also
+identify the package versions used.
 
 ## Runs saved with OutputVault 0.3
 

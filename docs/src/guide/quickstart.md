@@ -4,9 +4,15 @@ This page saves, adds to, loads, lists and queries runs made of plain Julia valu
 your own, with no model package. For a model package that stores its types through OutputVault, see
 [Frontends](@ref); TransitionFunctionIteration's documentation shows one.
 
-The code runs in a git repository: a saved solution records the commit of the repository of the
-active Julia project. The output under each block is what the code printed when these docs were
-built.
+Suppose `v1` is a calibration experiment, `base` and `alt` are parameter choices, and each solution
+will eventually have unconditional and conditional statistics. The names of those outputs are
+yours: OutputVault needs no catalogue of them in advance.
+
+Install OutputVault and Parquet2 as shown on the [home page](@ref OutputVault.jl). Run this page's
+blocks in order in a Julia project inside a git repository. The branch and recorded commit come
+from that project's repository. On a detached HEAD or outside a repository, pass `branch = "demo"`
+to both handles below; without a repository, saving warns but works. The output under each block
+is what the code printed when these docs were built in a temporary repository.
 
 ## Configure and name a run
 
@@ -23,6 +29,8 @@ rf = RunHandle("base"; experdef = "v1")       # branch: the current git branch
 A run is one folder, `<root>/<branch>/res-v1-base/`, named by the three parts of the
 [`RunHandle`](@ref): the git branch, the experiment definition (`experdef`) and the variant
 ([Runs and Storage](@ref)).
+Making the handle creates no files. Repeating this tutorial with the same root and names replaces
+its previous runs; choose another experiment name to keep both versions.
 
 ## Save a solution
 
@@ -50,6 +58,7 @@ list_run(rf)
 Each [`save_result_item`](@ref) writes one value at a path chosen when the code runs. A NamedTuple of
 equal-length vectors is a table, saved as a Parquet file; another NamedTuple is a folder; anything
 else is a `.jld2` file. Saving at a path replaces what was there.
+Saving `stats/boom` leaves `stats/uncond` alone; saving a whole `stats` folder replaces all samples.
 
 ## Load
 
@@ -58,8 +67,18 @@ stats = load_result_item(rf, "stats/uncond")
 Tables.columns(stats).mean
 ```
 
+The default `.jld2` writer stores a value under the key `"value"`. A folder of such files therefore
+loads as a NamedTuple of Dicts:
+
 ```@example quickstart
 load_result_item(rf, "notes")
+```
+
+To resume with the same Julia code, load the native solution:
+
+```@example quickstart
+saved = load_result_item(rf, "solution"; native = true)
+saved.params.β, saved.policy
 ```
 
 Loading returns data: a table as a [`StoredTable`](@ref OutputVault.Formats.StoredTable), a folder
@@ -85,6 +104,11 @@ statistics) turned into rows of a column `stat`:
 shape = QueryShape("stats/{sample}"; keys = (:variable,), column = :stat)
 query_results(RunPattern(experdef = "v1"), shape; sample = :uncond, stat = :mean)
 ```
+
+There are two rows per run, one for `K` and one for `C`. The `sample` column comes from the path,
+`variable` from the table's key column, and `stat` from its column names. Without `stat = :mean`,
+each variable also contributes a row for `std`. Select one key with `variable = :C`, or include
+nested git branches with `RunPattern(branch = "**", experdef = "v1")`.
 
 [`query_results`](@ref) reads only the files of the selected runs and samples, with DuckDB, and
 returns a column table ([Queries](@ref)).

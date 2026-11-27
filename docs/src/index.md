@@ -21,23 +21,35 @@ next to its solution, and queries results across runs.
 ```julia
 using OutputVault, Parquet2
 
-set_config!(Config(output_root = "/path/to/outputs",
+set_config!(Config(output_root = mktempdir(),            # use a permanent folder for real runs
                    table_format = OutputVault.Formats.ParquetFormat()))
 
-rf = RunHandle("base"; experdef = "v1")                   # branch: the current git branch
-save_solution(rf, (; obj = solution))                      # starts the run over
-save_result_item(rf, "stats/uncond", stats_table)          # any Tables.jl table, a NamedTuple, any value
+rf = RunHandle("base"; branch = "demo", experdef = "v1")
+solution = (params = (α = 0.33, β = 0.96), policy = [1.0, 1.1, 1.2])
+save_solution(rf, solution)                                # starts the run over
+save_result_item(rf, "stats/uncond", (variable = ["K", "C"], mean = [3.5, 1.2]))
 load_result_item(rf, "stats/uncond")                       # the table, with its metadata
 
 shape = QueryShape("stats/{sample}"; keys = (:variable,), column = :stat)
 query_results(RunPattern(experdef = "v1"), shape; stat = :mean)   # every run of v1, in long form
 ```
 
+The query returns one row per selected cell, with columns
+`branch, experdef, variant, sample, variable, stat, value`. Saving another variant at the same item
+paths makes it part of the same query. No model integration is needed for plain Julia values or
+Tables.jl tables; [Frontends](@ref) explains how a package restores its own types.
+
+The explicit branch chooses a folder, without switching git branches. Normally omit it to use the
+active project's branch. Provenance always records the active project's repository; without a
+repository, saving warns and still works. Saving a solution replaces the whole run, including
+previous result items.
+
 ## Installation
 
 ```julia
 using Pkg
 Pkg.add(url = "https://github.com/elenev/OutputVault.jl")
+Pkg.add("Parquet2")
 ```
 
 With SSH access to GitHub, `url = "git@github.com:elenev/OutputVault.jl.git"` works too. The package

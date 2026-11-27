@@ -29,7 +29,8 @@ to_storage(x) = x
 Rebuild a `T` from the data OutputVault read back: a [`StoredTable`](@ref Formats.StoredTable) for
 a table file, a NamedTuple of the members' data for a folder. OutputVault calls it only with a
 type the caller supplied. There is no generic method, so loading with a type that has none is a
-`MethodError`. `context` is what the caller of `load_result_item` passed.
+`MethodError`. `context` is what the caller of `load_result_item` passed. A `.jld2` item uses
+[`read_portable_jld2`](@ref) instead, without calling `from_storage`.
 """
 function from_storage end
 

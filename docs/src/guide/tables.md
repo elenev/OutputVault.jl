@@ -5,7 +5,7 @@ Formats live in `OutputVault.Formats`, a submodule that uses nothing else from O
 be used on its own:
 
 ```julia
-using OutputVault.Formats, Parquet2
+using OutputVault, OutputVault.Formats, Parquet2, Tables, DataAPI
 write_table(ParquetFormat(), "t.parquet", (x = [1.0, 2.0], name = [:a, :b]); metadata = Dict("source" => "model"))
 t = read_table(ParquetFormat(), "t.parquet")     # a StoredTable: Tables.columns(t).x, DataAPI.metadata(t, "source")
 ```
@@ -30,15 +30,16 @@ extension that reads and writes it. It keeps the metadata in Parquet's key-value
 columns in an entry of the metadata, and they come back as Symbols. DuckDB, Python, R and MATLAB read
 the files directly.
 
-Without Parquet2 loaded, writing or reading a Parquet table is a `MethodError` whose message says
-`using Parquet2`.
+Without Parquet2 loaded, writing or reading a Parquet table is a `MethodError` with a hint to load
+`Parquet2`. The metadata restoration of Symbol columns applies to the Julia reader; queries return
+text as strings.
 
 ## Adding a format
 
 A format is a type with four methods:
 
 ```julia
-using OutputVault.Formats
+using OutputVault, OutputVault.Formats
 import OutputVault.Formats: extension, format_from_extension, write_table, read_table
 
 struct MyFormat <: AbstractTableFormat end
@@ -59,4 +60,4 @@ end
 
 `Base.iswritable(::MyFormat)` may return `false` for a format that is only read. `format_from_extension`
 is what makes a file a table file when a run is read: define it only in the package that defines the
-format. Queries ([Queries](@ref)) support the built-in formats.
+format. Adding file I/O does not add a DuckDB reader: queries currently support Parquet only.

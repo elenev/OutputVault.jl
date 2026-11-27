@@ -1,4 +1,4 @@
-# The walkthrough pages (the quick start) run their code: Documenter runs their @example and @repl
+# The walkthrough pages run their code: Documenter runs their @example and @repl
 # blocks when it builds the docs, and test/test_docs.jl runs the same blocks in fresh Julia
 # processes. Both run them in a throwaway git repository on branch `main`, prepared here, with the
 # pages' output root `../outputs` next to it. The repository holds an empty Project.toml and is the
@@ -6,7 +6,7 @@
 # stays on the load path. A ```julia block whose preceding paragraph begins "Save this as `NAME`" is
 # written to NAME in the repository.
 
-const WALKTHROUGH_PAGES = ("quickstart.md",)
+const WALKTHROUGH_PAGES = ("quickstart.md", "frontends.md")
 walkthrough_path(page) = joinpath(@__DIR__, "src", "guide", page)
 
 # the ```julia blocks of a page that its text says to save as a file: the block after a paragraph
