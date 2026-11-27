@@ -2,6 +2,23 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  # Pushes to main that change code give pull requests a cache to start from and Codecov a base
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'ext/**'
+      - 'test/**'
+      - 'sql/**'
+      - 'docs/walkthroughs.jl'
+      - 'docs/src/guide/quickstart.md'   # the tests run these walkthrough pages
+      - 'docs/src/guide/frontends.md'
+      - 'Project.toml'
+      - '.github/workflows/CI.yml'
+# actions: write lets the cache step delete the caches it replaces
+permissions:
+  contents: read
+  actions: write
 jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }}
@@ -25,7 +42,7 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
       - uses: julia-actions/julia-processcoverage@v1
