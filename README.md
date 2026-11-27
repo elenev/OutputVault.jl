@@ -52,7 +52,9 @@ and `compare_economies(moments, RunPattern(experdef = "v1"))` compares the saved
 >
 > The branch and the git record come from the active project. `RunHandle` defaults to the branch
 > of the repository holding the active Julia project, and `save_solution` records that repository's
-> commit and diffs, whatever the working directory. Pass `branch = ...` on a detached HEAD.
+> commit and diffs, whatever the working directory. Pass `branch = ...` on a detached HEAD, or when
+> the active project is not in a git repository (the global environment, or `Pkg.test`'s temporary
+> environment).
 
 ## Documentation
 

@@ -25,6 +25,13 @@ the experdef uses the same characters without `-`, so the folder name splits at 
 level of the branch starts with `res-` or `.`. The branch defaults to the git branch of the active
 project's repository ([`current_branch`](@ref)).
 
+The branch and the git record ([Provenance](@ref)) come from the repository of the active project,
+not from the working directory, so they belong to the code that ran even when Julia was started
+elsewhere. (OutputVault 0.3 used the working directory.) When the active project is not in a git
+repository, `RunHandle` needs `branch`: for example with the global environment active, or under
+`Pkg.test`, whose active project is a temporary environment. Tests either pass `branch` or create a
+throwaway repository and activate its project.
+
 A run starts with its solution. [`save_solution`](@ref) replaces the whole run, so a run never mixes
 results computed from two solutions. Result items are then saved with
 [`save_result_item`](@ref), at any time and in any order, at paths chosen when the code runs.
