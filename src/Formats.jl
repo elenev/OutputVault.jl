@@ -1,10 +1,9 @@
 """
     OutputVault.Formats
 
-Table file formats: how a Tables.jl table and its file-level metadata are written to one file and
-read back. Self-contained (it uses nothing else from OutputVault). Each built-in format needs its
-I/O package loaded (`using Parquet2` for [`ParquetFormat`](@ref)), which loads the package
-extension with its `write_table` and `read_table` methods.
+Read and write Tables.jl tables with their file-level metadata, one file per table. These functions
+can be used without configuring a run. Load the format's I/O package before calling `write_table`
+or `read_table` (`using Parquet2` for [`ParquetFormat`](@ref)).
 
 A format is a type `F <: AbstractTableFormat` with the methods [`extension`](@ref),
 [`format_from_extension`](@ref), [`write_table`](@ref), [`read_table`](@ref) and, optionally,

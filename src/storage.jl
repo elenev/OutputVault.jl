@@ -51,8 +51,8 @@ end
     read_portable_jld2(::Type{T}, io; context = nothing)
 
 Rebuild a `T` from the open JLD2 file `io`, as written by [`write_portable_jld2`](@ref).
-`context` is what the caller of [`load_result_item`](@ref) passed, for what the file does not store
-(TransitionFunctionIteration passes the model). Without a method for `T`: `io["value"]`.
+`context` supplies information needed to rebuild the object, such as its model, as passed to
+[`load_result_item`](@ref). The default reader returns `io["value"]`.
 """
 read_portable_jld2(::Type, io; context = nothing) = io["value"]
 

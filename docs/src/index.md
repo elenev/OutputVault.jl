@@ -1,20 +1,25 @@
 # OutputVault.jl
 
-Research models produce a lot of output: solutions, simulations, moments, impulse responses. Across
-git branches, experiment definitions and variants of a model, it is easy to lose track of which code
-produced which numbers. OutputVault.jl gives every run one folder, records the git state of the code
-next to its solution, and queries results across runs.
+OutputVault stores the solutions and results of research model runs. Each run has a folder named
+by its git branch, experiment and variant, with a record of the code that produced it.
 
-- One folder per run: `<root>/<branch>/res-<experdef>-<variant>/`. A run starts with its solution;
-  results computed from it are saved later, one item at a time, at paths chosen when the code runs.
-- Provenance: the commit of the active project's repository and, for a dirty repository, its diffs.
-  Saving a new solution replaces the run, so a run never mixes results of two solutions.
-- Files other languages read: tables are Parquet files, which Python, R, MATLAB and DuckDB read
-  without Julia. Other values are JLD2 files, as Julia objects or in a layout their package defines.
-- Queries across runs with DuckDB, in Julia terms: [`query_results`](@ref) returns the cells of a
-  family of tables in long form, reading only the files of the selected runs.
-- No model package built in: a package (a frontend) says how its types are stored, and OutputVault
-  does the reading and writing. TransitionFunctionIteration is one, through its package extension.
+Use it to save a solution, add results as you compute them, and compare those results across runs.
+For example, you can collect unconditional statistics for several calibrations, then query the
+mean of one variable in every calibration without loading the solutions.
+
+Tables are stored in Parquet files, which you can also read in Python, R, MATLAB or DuckDB.
+Other Julia values are stored in JLD2 files. You choose the names and organization of the results
+within each run.
+
+## Installation
+
+```julia
+using Pkg
+Pkg.add(url = "https://github.com/elenev/OutputVault.jl")
+Pkg.add("Parquet2")
+```
+
+Requires Julia 1.12 or later. Load Parquet2 when saving or loading tables.
 
 ## Quick example
 
@@ -36,30 +41,19 @@ query_results(RunPattern(experdef = "v1"), shape; stat = :mean)   # every run of
 
 The query returns one row per selected cell, with columns
 `branch, experdef, variant, sample, variable, stat, value`. Saving another variant at the same item
-paths makes it part of the same query. No model integration is needed for plain Julia values or
-Tables.jl tables; [Frontends](@ref) explains how a package restores its own types.
+paths makes it part of the same query. Plain Julia values and Tables.jl tables can be saved
+directly; for your own types, see [Storing Your Own Types](@ref).
 
 The explicit branch chooses a folder, without switching git branches. Normally omit it to use the
 active project's branch. Provenance always records the active project's repository; without a
 repository, saving warns and still works. Saving a solution replaces the whole run, including
 previous result items.
 
-## Installation
-
-```julia
-using Pkg
-Pkg.add(url = "https://github.com/elenev/OutputVault.jl")
-Pkg.add("Parquet2")
-```
-
-With SSH access to GitHub, `url = "git@github.com:elenev/OutputVault.jl.git"` works too. The package
-requires Julia 1.12 or later. Tables need `using Parquet2`.
-
 ## Where to go next
 
-- [Quick Start](@ref): saving, loading, listing and querying runs, with no model package.
+- [Quick Start](@ref): save, load and compare two runs.
 - [Runs and Storage](@ref): runs, paths, the storage rules and provenance.
 - [Saving and Loading](@ref): configuration, solutions, items, finding runs.
-- [Frontends](@ref): storing the types of a package.
+- [Storing Your Own Types](@ref): storage methods for your package's result types.
 - [Table Formats](@ref): Parquet, and adding a format.
 - [Queries](@ref): shapes, selections, and the SQL macros for other languages.

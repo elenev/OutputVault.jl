@@ -1,37 +1,14 @@
-# Frontends
+# Storing Your Own Types
 
-A frontend is a package that stores its types through OutputVault, such as TransitionFunctionIteration
-through its package extension. OutputVault does all reading and writing; the frontend says what to
-store for each of its types and how to rebuild them.
+Use storage methods to let users save and reload your package's result types. The collection of
+these methods, along with any save, load or query functions you provide, is called a *frontend*.
 
-Plain values and Tables.jl tables work without a frontend. Add one when users should be able to
-load your package's objects with their original behavior, rather than manipulate stored columns
-and Dicts. The examples below run independently of the [Quick Start](@ref).
+For an object stored as a table or folder, define `to_storage` to choose its representation and
+`from_storage` to rebuild it. For an object stored in its own JLD2 file, you can define a layout
+inside that file. Both approaches are illustrated below.
 
-## The contract
-
-For each of its types `T`, a frontend may define:
-
-- `to_storage(x::T)`: the value OutputVault writes by the storage rules ([Runs and Storage](@ref)):
-  a Tables.jl table (one table file), a NamedTuple (a folder) or anything else (a `.jld2` file). A type
-  that is already a table needs no method.
-- `from_storage(::Type{T}, data; context)`: rebuild a `T` from the data read back, a
-  [`StoredTable`](@ref OutputVault.Formats.StoredTable) or a NamedTuple of the members' data.
-  OutputVault calls it only with a type the caller supplied, never with one read from disk.
-- `write_portable_jld2(io, x::T)` and `read_portable_jld2(::Type{T}, io; context)`: a portable layout inside a `.jld2`
-  file instead of the Julia object, for example plain arrays that h5py reads. `io` is the open JLD2
-  file.
-
-`context` is whatever the caller of [`load_result_item`](@ref) passed, for a type whose files do not
-store everything it needs (TransitionFunctionIteration passes the model). `from_storage` sees only the
-item's own data, never other items of the run, so values that are meaningful only together form one
-item. Frontends never see a path, except through the JLD2 handle.
-
-`to_storage` applies at every level of a folder, `from_storage` does not: OutputVault cannot know the
-types of a folder's members, so the parent's `from_storage` converts them. Typed loading of a table
-or folder without a `from_storage` method throws `MethodError`. For a `.jld2` item the reader is
-`read_portable_jld2`, whose default returns `io["value"]`; it does not call `from_storage` or check
-that the stored value has type `T`.
+A type that already implements Tables.jl can be saved directly; add `from_storage` to restore it
+as that type when loading.
 
 ## An object stored as a folder
 
@@ -68,7 +45,7 @@ list_run(rf)
 
 The outer solution is a folder, and `to_storage(economy)` gives another folder. Its `params` member
 is a table because all its members are equal-length vectors. `settings` is a folder of scalar
-values, so the raw values are under `"value"` in Dicts. The parent converter above handles both:
+values, so the raw values are under `"value"` in Dicts. The `from_storage` method above handles both:
 
 ```@example frontend
 restored = load_result_item(rf, "solution/economy", Economy)
@@ -84,9 +61,12 @@ query_results([rf], shape; parameter = :beta)
 
 ## An object stored in a portable file
 
-Keep a type unchanged by `to_storage` when it needs its own layout inside a `.jld2` file. Here the
-writer saves plain arrays and a name; the reader obtains a required model identifier from the
-caller. The `context` keyword is available only to the reader:
+To make a JLD2 file readable without your Julia type definitions, store ordinary arrays, numbers
+and strings with `write_portable_jld2`. Define `read_portable_jld2` to reconstruct the object.
+Leave `to_storage` at its default, which returns the object unchanged.
+
+Here the saved solution belongs to a particular model. The reader checks the model identifier
+passed through `context` before loading its coefficients:
 
 ```@example frontend
 # a solution with its own layout inside a .jld2 file; the model comes from the caller
@@ -110,14 +90,29 @@ fit = load_result_item(rf, "fit", Solution; context = :dsge)
 fit.coefs
 ```
 
-The same hooks work with `write_object_file` and `read_object_file` outside a run. Native solution
-copies bypass all these hooks and contain the original Julia objects, so a frontend may offer
-both a portable reload and a native reload with compatible code.
+Use the same methods with `write_object_file` and `read_object_file` to save an object outside a
+run. The optional `native.jld2` solution copy stores the original Julia objects directly and needs
+compatible Julia code to reload them.
 
-## Conveniences
+## How conversion works
 
-Functions that save or load several items at once, or that know which type each path holds, belong
-in the frontend's own code. TransitionFunctionIteration's `save_result(rf, result)` calls
-`save_solution` and then `save_result_item` for each output of `solve_and_simulate`, and
-`load_result(rf, :stats)` loads an item as TFI's types. A frontend can also ship
-[`QueryShape`](@ref)s for its tables, so that its users query them without naming paths and columns.
+`to_storage` is applied to every member of a folder. On loading, `from_storage` is called for the
+type passed to `load_result_item(rf, path, T)`. Its input is a
+[`StoredTable`](@ref OutputVault.Formats.StoredTable) or a NamedTuple containing the folder's data.
+Convert any nested members inside that method, as the `Economy` example does for its settings.
+Loading a table or folder as a type without a `from_storage` method throws `MethodError`.
+
+For JLD2 files, `read_portable_jld2` receives the open file instead. Its default reads the value
+under `"value"`, without checking its type. Define your own reader to validate the contents or
+rebuild the object from its stored parts.
+
+Both readers receive the caller's `context` keyword. Use it for additional information needed to
+rebuild the object, such as its model. A reader has access to the item's own data and this context;
+save values that must be restored together as one item.
+
+## Save, load and query functions for your package
+
+Give frequently used result paths names in your package's API. A `save_run` function might save
+the solution and several result items; a matching loader can pass the appropriate type when
+loading each path. Define [`QueryShape`](@ref)s for your tables so users can select results without
+having to remember their stored paths and column names.

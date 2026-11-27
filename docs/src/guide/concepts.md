@@ -19,18 +19,14 @@ A run is the saved results of one configuration of a model, in one folder:
 | experdef | the experiment definition: a set of runs designed together |
 | variant | one configuration within an experdef |
 
-A [`RunHandle`](@ref) names a run. Its names are checked when it is made: the variant uses only
-`A–Z`, `a–z`, `0–9` and `_ . + = -`, which is safe on every operating system and in shell commands;
-the experdef uses the same characters without `-`, so the folder name splits at its first hyphen; no
-level of the branch starts with `res-` or `.`. The branch defaults to the git branch of the active
-project's repository ([`current_branch`](@ref)).
+A [`RunHandle`](@ref) names a run. The variant may contain ASCII letters, digits and `_ . + = -`;
+the experiment name may contain the same characters except `-`. A branch may contain `/`, but
+none of its levels may start with `res-` or `.`.
 
-The branch and the git record ([Provenance](@ref)) come from the repository of the active project,
-not from the working directory, so they belong to the code that ran even when Julia was started
-elsewhere. (OutputVault 0.3 used the working directory.) When the active project is not in a git
-repository, or on a detached HEAD, `RunHandle` needs `branch`: for example with the global
-environment active, or under `Pkg.test`, whose active project is a temporary environment. Tests either pass `branch` or create a
-throwaway repository and activate its project.
+The branch defaults to the active Julia project's git branch ([`current_branch`](@ref)). The
+recorded commit and diffs also come from that project's repository, even if you start Julia in
+another folder. Pass `branch` explicitly when the project is outside a repository or on a
+detached HEAD.
 
 A handle only identifies a run; it creates no files. Changing the active configuration changes
 which output root that same handle refers to. Passing `branch` chooses a folder and does not switch
@@ -38,9 +34,8 @@ git branches or change the source of provenance.
 
 A run starts with its solution. [`save_solution`](@ref) replaces the whole run, so a run never mixes
 results computed from two solutions. Result items are then saved with
-[`save_result_item`](@ref), at any time and in any order, at paths chosen when the code runs.
-OutputVault fixes no layout of possible outputs: it fixes only the grammar above and the reserved
-top-level names `solution` and `native` (`.provenance` cannot be an item path, since names have no `.`).
+[`save_result_item`](@ref), at any time and in any order, at paths chosen when the code runs. The top-level names `solution` and `native` are reserved;
+the git record is kept separately in `.provenance/`.
 
 ## Paths
 
@@ -80,14 +75,13 @@ OutputVault returns the following data when no type is supplied:
 - a folder is a NamedTuple of its items, in alphabetical order;
 - a `.jld2` file is a Dict of its contents.
 
-The type used for a frontend conversion always comes from the caller. JLD2 itself can reconstruct
-Julia objects stored in a file; an ordinary `.jld2` item is therefore not automatically portable
-across languages or code versions. A frontend can define a plain-data layout for it.
+To restore an object of your own type, use `load_result_item(rf, path, T)`. Define
+`from_storage(T, data)` for a table or folder, or `read_portable_jld2(T, io)` for a `.jld2` file;
+see [Storing Your Own Types](@ref).
 
-Turning data into a package's types is driven by the type the caller passes:
-`load_result_item(rf, path, T)` calls `from_storage(T, data)` for a table or a folder and
-`read_portable_jld2(T, io)` for a `.jld2` file ([Frontends](@ref)). `from_storage` sees only the item's own data,
-so values that are only meaningful together belong in one item.
+JLD2 reconstructs the Julia objects stored in its files, so reading them may require the original
+types and compatible code. For files that must also be read by other languages or later code,
+define a layout of ordinary arrays, numbers and strings.
 
 ## Provenance
 
@@ -107,9 +101,8 @@ OutputVault does not lock runs. Coordinate writers to the same run yourself; sep
 written independently. Commit the project's `Manifest.toml` when the recorded commit should also
 identify the package versions used.
 
-## Runs saved with OutputVault 0.3
+## Reading older runs
 
 Runs saved with OutputVault 0.3 load without changes. Their provenance is in `solution/` and their
-native copy is `solution/res.jld2`: `load_result_item(rf, "solution"; native = true)` reads it there,
-and reading `solution` skips it. Their other items are at the same paths as before. Runs saved with
-OutputVault 0.1 are not supported.
+native copy is `solution/res.jld2`. Use `load_result_item(rf, "solution"; native = true)` to read
+that copy. Runs saved with OutputVault 0.1 are not supported.

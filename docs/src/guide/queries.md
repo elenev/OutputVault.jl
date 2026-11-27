@@ -1,7 +1,8 @@
 # Queries
 
-[`query_results`](@ref) reads the table items of many runs at once with DuckDB and returns their
-cells in long form. OutputVault writes the SQL; callers describe the tables in Julia terms.
+Use [`query_results`](@ref) to collect the same statistics across model variants, samples or git
+branches. The result is a table with one row per selected value, labeled by the run and item it
+came from. A `QueryShape` describes the saved tables; keyword arguments select the values to read.
 
 ## Shapes
 
@@ -51,7 +52,7 @@ shape = QueryShape("stats/{sample}"; keys = (:variable,), column = :stat)
 query_results(RunPattern(experdef = "v1"), shape; sample = [:uncond, :boom], variable = "r_*", stat = :mean)
 ```
 
-For TFI's IRF table layout, where rows are identified by shock, statistic and period:
+For an impulse-response table whose rows are identified by shock, statistic and period:
 
 ```julia
 irfshape = QueryShape("irf/{start}/stats";
@@ -75,10 +76,12 @@ gives no rows for that run. A stored `NaN` stays `NaN`. A selected cell that can
 
 ## What is read
 
-The runs and the placeholder selections are matched against folder and file names, so only the files
-of the selected runs and placeholder values are opened, and in a synced folder (Dropbox) only those
-are downloaded. Selections on keys and on `column` need those files to be read in full. Only files of
-the configured table format are read; `.jld2` files are not queryable.
+Selecting runs and placeholders limits which files are opened. For example, `sample = :uncond`
+reads the unconditional statistics and leaves other sample files alone. This is useful when your
+output folder is synced through a service such as Dropbox: only the selected files need to be
+downloaded. Filtering rows or columns still requires reading those files in full.
+
+Queries read tables in the configured table format. JLD2 files cannot be queried this way.
 
 ## SQL for other languages
 
@@ -110,6 +113,7 @@ These macros return the stored columns plus `__file` and `__row`; unlike Julia's
 they do not add run labels or turn the cells into long form. The example skips hidden staging and
 trash folders. Find the files before querying, so DuckDB opens only the selected ones.
 
-The variant follows no naming convention of OutputVault's; `vault_split_variant` applies the
-project's, e.g. `UNNEST(vault_split_variant(variant, '^([a-z]+)(\d*)$', ['scheme', 'level']))` splits
-`capbail85` into `capbail` and `85`.
+If your variant names encode several choices, `vault_split_variant` separates them with a regular
+expression. For example,
+`UNNEST(vault_split_variant(variant, '^([a-z]+)(\d*)$', ['scheme', 'level']))` splits `capbail85`
+into `capbail` and `85`.

@@ -1,25 +1,20 @@
 # Quick Start
 
-This page saves, adds to, loads, lists and queries runs made of plain Julia values and one type of
-your own, with no model package. For a model package that stores its types through OutputVault, see
-[Frontends](@ref); TransitionFunctionIteration's documentation shows one.
-
-Suppose `v1` is a calibration experiment, `base` and `alt` are parameter choices, and each solution
-will eventually have unconditional and conditional statistics. The names of those outputs are
-yours: OutputVault needs no catalogue of them in advance.
+This tutorial saves two calibrations of a model, adds summary statistics and compares their means.
+The experiment is called `v1`, and its two parameter choices are `base` and `alt`. The values are
+illustrative; substitute your model's solutions and statistics when using this in your own work.
 
 Install OutputVault and Parquet2 as shown on the [home page](@ref OutputVault.jl). Run this page's
 blocks in order in a Julia project inside a git repository. The branch and recorded commit come
 from that project's repository. On a detached HEAD or outside a repository, pass `branch = "demo"`
-to both handles below; without a repository, saving warns but works. The output under each block
-is what the code printed when these docs were built in a temporary repository.
+to both handles below. Saving outside a repository warns and still works.
 
 ## Configure and name a run
 
 ```@example quickstart
 using OutputVault, Parquet2, Tables
 
-root = abspath("../outputs")       # your output folder
+root = abspath("../outputs")       # outside the repository, so saved runs leave it clean
 set_config!(Config(output_root = root,
                    table_format = OutputVault.Formats.ParquetFormat()))   # tables as Parquet files
 
@@ -39,12 +34,13 @@ save_solution(rf, (; params = (α = 0.33, β = 0.96), policy = [1.0, 1.1, 1.2]))
 list_run(rf)
 ```
 
-The solution starts the run: [`save_solution`](@ref) replaces whatever the run held before. It is
-saved at the path `solution` by the storage rules: a NamedTuple is a folder, and so is the
-NamedTuple `params`; a value that is not a table or a NamedTuple is a `.jld2` file
-(`solution/params/α.jld2`, `solution/policy.jld2`). `.provenance/git_commit.txt`
-holds the commit, and `native.jld2` holds the whole solution as Julia objects, for a fast reload with
-the same code.
+[`save_solution`](@ref) starts the run, replacing anything saved under this run's name. Here,
+`params` becomes a folder of parameter files, and the policy vector is saved in
+`solution/policy.jld2`. The [Runs and Storage](@ref) guide explains how values become files and
+folders.
+
+The run also contains `.provenance/git_commit.txt`, with the code's commit, and `native.jld2`,
+with a copy of the complete solution for reloading in Julia.
 
 ## Add results
 
@@ -55,10 +51,9 @@ save_result_item(rf, "notes", (; text = "first try", converged = true))
 list_run(rf)
 ```
 
-Each [`save_result_item`](@ref) writes one value at a path chosen when the code runs. A NamedTuple of
-equal-length vectors is a table, saved as a Parquet file; another NamedTuple is a folder; anything
-else is a `.jld2` file. Saving at a path replaces what was there.
-Saving `stats/boom` leaves `stats/uncond` alone; saving a whole `stats` folder replaces all samples.
+Each [`save_result_item`](@ref) adds a result at the given path. The statistics are NamedTuples of
+equal-length vectors, so they become Parquet tables; `notes` becomes a folder of JLD2 files.
+Saving `stats/boom` again replaces that sample. Saving at `stats` replaces all samples in the folder.
 
 ## Load
 
@@ -67,8 +62,14 @@ stats = load_result_item(rf, "stats/uncond")
 Tables.columns(stats).mean
 ```
 
-The default `.jld2` writer stores a value under the key `"value"`. A folder of such files therefore
-loads as a NamedTuple of Dicts:
+Pass a type to read one value from a `.jld2` file:
+
+```@example quickstart
+load_result_item(rf, "notes/text", String)
+```
+
+Without a type, the file's raw contents load. The default `.jld2` writer stores a value under the
+key `"value"`, so the `notes` folder loads as a NamedTuple of Dicts:
 
 ```@example quickstart
 load_result_item(rf, "notes")
@@ -81,9 +82,9 @@ saved = load_result_item(rf, "solution"; native = true)
 saved.params.β, saved.policy
 ```
 
-Loading returns data: a table as a [`StoredTable`](@ref OutputVault.Formats.StoredTable), a folder
-as a NamedTuple of its items, a `.jld2` file as a Dict. Pass a type to get your own type back
-([Your own type](#Your-own-type)).
+The statistics load as a [`StoredTable`](@ref OutputVault.Formats.StoredTable), which you can read
+through Tables.jl. To restore a custom result type, pass its type to `load_result_item`; see
+[Your own type](#Your-own-type).
 
 ## Query across runs
 
@@ -120,13 +121,13 @@ save_solution(rf, (; params = (α = 0.33, β = 0.95)))
 list_run(rf).items.path
 ```
 
-The statistics and notes are gone: nothing in a run was computed from an earlier solution. Save
-them again after a new solution.
+The previous statistics and notes have been removed. Recompute and save the results for the new
+solution, or use a different variant name to keep both solutions and their results.
 
 ## Your own type
 
-A type of your own is stored through two methods. Here is a summary table that keeps a label in the
-file's metadata:
+For a custom summary type, define a Tables.jl interface and a `from_storage` method. This lets you
+save it as a table and load it back as a `Summary`, retaining its label in the file's metadata:
 
 ```@example quickstart
 using DataAPI
@@ -156,4 +157,4 @@ s = load_result_item(rf, "summary", Summary)
 
 `Summary` is a table, so it is saved as one, with its metadata; `from_storage` turns the table read
 back into a `Summary`. A type that is not a table can define `to_storage` to say what to save
-instead, or `write_portable_jld2` and `read_portable_jld2` for its own layout inside a `.jld2` file ([Frontends](@ref)).
+instead, or `write_portable_jld2` and `read_portable_jld2` for its own layout inside a `.jld2` file ([Storing Your Own Types](@ref)).

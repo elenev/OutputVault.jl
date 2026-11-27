@@ -2,23 +2,18 @@
 
 ## Configuration
 
-Run storage and queries use the active configuration, set once with [`set_config!`](@ref) (a
-project package typically calls it in its `__init__`) or for a block of code with
-[`with_config`](@ref):
+Choose an output folder and a table format with [`set_config!`](@ref). Subsequent saves, loads and
+queries use these settings:
 
 ```julia
 using OutputVault, Parquet2
 
 set_config!(Config(output_root = "/path/to/outputs",
                    table_format = OutputVault.Formats.ParquetFormat(),   # needed only to write tables
-                   native = true))                                       # also write native.jld2
+                   native = false))                                      # skip native.jld2
 ```
 
-`staging_root` (default `<output_root>/.staging`) is where a solution's run is written before it is
-renamed into place; it must be on the same file system as the runs. A project that computes its
-settings (the root from the machine, say) defines a subtype of [`OutputVault.AbstractConfig`](@ref) instead.
-
-For a temporary override, including tasks started inside the block:
+Use [`with_config`](@ref) to save to a different folder for a block of code:
 
 ```julia
 with_config(Config(output_root = mktempdir())) do
@@ -27,7 +22,15 @@ with_config(Config(output_root = mktempdir())) do
 end
 ```
 
-Other tasks keep their configuration. Object files outside runs need no configuration.
+The override applies within the block and to tasks it starts. Other tasks keep their settings.
+Object files outside runs need no configuration.
+
+For project-wide defaults, call `set_config!` when your project initializes. If you need to compute
+settings dynamically, such as choosing a folder for the current machine, define a subtype of
+[`OutputVault.AbstractConfig`](@ref).
+
+`staging_root` defaults to `<output_root>/.staging`. Keep it on the same file system as the output
+folder so completed runs can be renamed into place.
 
 ## Solutions
 
@@ -36,11 +39,13 @@ save_solution(rf, (; obj, stv))                     # solution/obj.jld2, solutio
 save_solution(rf, (; obj, stv); dirty_repo_check = :error)
 ```
 
-[`save_solution`](@ref) writes the new run to a folder under the staging root, renames the old run to
-a temporary name, renames the new one into place and deletes the old one. It returns the run's folder.
-If a rename fails, no run is lost or partly deleted: the new run stays in the staging folder, which
-`save_solution` then returns with a warning that says where the new and the old run are
-([Files held open on Windows](#Files-held-open-on-Windows)).
+[`save_solution`](@ref) replaces the whole run, including previously saved result items, and returns
+the new run's folder. Choose a different variant name when you want to keep the previous solution.
+
+The new run is written in a staging folder before replacing the old one. If it cannot be moved
+into place, `save_solution` returns its staging path and warns where both copies are. Follow the
+warning's instructions before adding more results; see
+[Files held open on Windows](#Files-held-open-on-Windows).
 
 The native copy, `native.jld2`, holds each member of the solution NamedTuple under its name:
 

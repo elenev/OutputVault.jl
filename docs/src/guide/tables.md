@@ -1,8 +1,8 @@
 # Table Formats
 
-Tables are written in the format of the configuration (`Config(; table_format)`), one file per table.
-Formats live in `OutputVault.Formats`, a submodule that uses nothing else from OutputVault, so it can
-be used on its own:
+Set `table_format` in [`Config`](@ref) to choose how tables are saved. Each table becomes one file,
+with its column names and file metadata. You can also read and write individual table files
+directly through `OutputVault.Formats`, without configuring a run:
 
 ```julia
 using OutputVault, OutputVault.Formats, Parquet2, Tables, DataAPI
@@ -26,9 +26,9 @@ file's metadata.
 ## Parquet
 
 [`ParquetFormat`](@ref OutputVault.Formats.ParquetFormat) needs `using Parquet2`, which loads the
-extension that reads and writes it. It keeps the metadata in Parquet's key-value metadata. Parquet stores Symbols as strings; the format lists Symbol
-columns in an entry of the metadata, and they come back as Symbols. DuckDB, Python, R and MATLAB read
-the files directly.
+extension that reads and writes it. It keeps metadata in the Parquet file. Symbol columns are
+stored as strings and restored as Symbols by the Julia reader. DuckDB, Python, R and MATLAB can
+read the files directly.
 
 Without Parquet2 loaded, writing or reading a Parquet table is a `MethodError` with a hint to load
 `Parquet2`. The metadata restoration of Symbol columns applies to the Julia reader; queries return

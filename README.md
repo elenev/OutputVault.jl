@@ -1,42 +1,39 @@
 # OutputVault.jl
 
-One folder for each run of a research model, with the git state of the code that produced it, and
-queries across runs.
-
-Model runs pile up across git branches, experiment definitions and variants of the model, and it is
-easy to lose track of which code produced which numbers. OutputVault gives each run a folder, saves
-its solution with the commit (and, if the repository was dirty, the diffs), and collects the results
-computed from that solution as items saved at paths of your choice.
+OutputVault stores the solutions and results of research model runs, records the code that
+produced them, and lets you query results across runs.
 
 For example, an experiment `v1` might compare variants `base` and `high_vol` on branch `main`.
-Your code computes each solution, then saves statistics for several samples and impulse responses
-from several starting points. OutputVault keeps them together and reads the same statistic across
-variants later, without loading the solutions. The solution can be any value needed to resume
-your work; the names and contents of its result items are yours.
+Save each solution along with the parameters and policies needed to resume your work, then add
+statistics, impulse responses or other results as you compute them. You can later compare the
+same statistic across variants without loading their solutions.
 
 ```
 <output_root>/<branch>/res-<experdef>-<variant>/
 ├── native.jld2       the solution as Julia objects (optional)
 ├── .provenance/      git_commit.txt  [git_staged.diff  git_unstaged.diff]
-├── solution/         the solution, e.g. obj.jld2  stv.jld2
+├── solution/         e.g. params/  policy.jld2
 └── <result items>    e.g. stats/uncond.parquet  irf/ss/stats.parquet  notes.jld2
 ```
 
-- A run starts with its solution. Saving a new solution replaces the run, so results of different
-  solutions never mix. Result items are saved afterwards, one at a time, in any order.
-- Fixed storage rules: a Tables.jl table is a table file (Parquet), a NamedTuple a folder, anything
-  else a `.jld2` file. Reading returns data; a type supplied by the caller turns it into objects.
-- Plain files: Python, R, MATLAB and DuckDB read the tables without Julia code.
-- Queries across runs with DuckDB, in Julia terms (`QueryShape`, `query_results`), reading only the
-  files of the selected runs, and SQL macros for other languages (`sql/outputvault.sql`).
-- No model package built in. A frontend package says how its types are stored (`to_storage`,
-  `from_storage`, `write_portable_jld2`, `read_portable_jld2`); TransitionFunctionIteration is one, through its package
-  extension.
+Tables are saved as Parquet files, which you can also read in Python, R, MATLAB or DuckDB.
+NamedTuples group results into folders; other values are saved in JLD2 files. You choose the item
+names and can [define how your own types are stored](https://www.vadimelenev.com/OutputVault.jl/stable/guide/frontends/).
+
+## Installation
+
+```julia
+using Pkg
+Pkg.add(url = "https://github.com/elenev/OutputVault.jl")
+Pkg.add("Parquet2")   # table I/O; queries use DuckDB, included with OutputVault
+```
+
+Julia 1.12 or later; `using Parquet2` for tables.
 
 ## Example
 
-This example needs no model package. It saves a small solution and two statistics, then queries
-them. `mktempdir()` gives it a fresh output folder; use a permanent folder for your research runs.
+Save a solution, add a summary table, and query its means. `mktempdir()` gives the example a fresh
+output folder; use a permanent folder for your research runs.
 
 ```julia
 using OutputVault, Parquet2
@@ -58,47 +55,32 @@ The query returns columns `branch, experdef, variant, sample, variable, stat, va
 selected cell. Add another variant with its own `RunHandle` and the same item paths to compare it
 in the same query. A handle names a folder; making one does not save anything.
 
-With TransitionFunctionIteration loaded, `save_result(rf, solve_and_simulate(mdl))` saves its
-standard outputs and `compare_economies(moments, RunPattern(experdef = "v1"))` compares saved runs.
+**Saving a solution replaces the whole run**, including any results saved previously. Use
+`save_result_item` to add results to an existing solution.
 
-> Saving a solution replaces the run. `save_solution` deletes everything saved for the run before,
-> so save again what you still need. `save_result_item` adds to the run.
->
-> The branch and the git record come from the active project. `RunHandle` defaults to the branch
-> of the repository holding the active Julia project, and `save_solution` records that repository's
-> commit and diffs, whatever the working directory. Pass `branch = ...` on a detached HEAD, or when
-> the active project is not in a git repository (the global environment, or `Pkg.test`'s temporary
-> environment). The explicit `branch = "demo"` above chooses a folder; it does not check out a git
-> branch or change which repository is recorded. Without a repository, saving warns and still works.
+For project work, omit `branch = "demo"` to use the active Julia project's git branch.
+`save_solution` records that project's commit and any uncommitted changes. Pass a branch explicitly
+when working outside a repository or on a detached HEAD; it chooses the output folder without
+switching branches. Saving outside a repository warns and still works.
 
 ## Documentation
 
-Start with the [executed quick start](docs/src/guide/quickstart.md), then read about
-[runs and storage](docs/src/guide/concepts.md), [saving and loading](docs/src/guide/saving_loading.md),
-[integrating your own types](docs/src/guide/frontends.md), [table formats](docs/src/guide/tables.md)
-and [queries](docs/src/guide/queries.md). Build the documentation with
-
-```
-julia --project=docs -e 'using Pkg; Pkg.instantiate()'
-julia --project=docs docs/make.jl
-```
-
-## Installation
-
-```julia
-using Pkg
-Pkg.add(url = "https://github.com/elenev/OutputVault.jl")
-Pkg.add("Parquet2")   # table I/O; queries use DuckDB, included with OutputVault
-```
-
-Julia 1.12 or later; `using Parquet2` for tables.
-
-## Compatibility
-
-Runs saved with OutputVault 0.3 load without changes; runs saved with 0.1 do not. OutputVault 0.4
-works with TransitionFunctionIteration 0.6 or later, whose extension stores TFI's types.
+Start with the [quick start](https://www.vadimelenev.com/OutputVault.jl/stable/guide/quickstart/), then read about
+[runs and storage](https://www.vadimelenev.com/OutputVault.jl/stable/guide/concepts/), [saving and loading](https://www.vadimelenev.com/OutputVault.jl/stable/guide/saving_loading/),
+[storing your own types](https://www.vadimelenev.com/OutputVault.jl/stable/guide/frontends/), [table formats](https://www.vadimelenev.com/OutputVault.jl/stable/guide/tables/)
+and [queries](https://www.vadimelenev.com/OutputVault.jl/stable/guide/queries/).
 
 ## Development
 
-`julia --project=. -e 'using Pkg; Pkg.test()'` runs the tests, which save, load and query through a
-temporary root and a throwaway git repository.
+From a checkout of this repository, run the tests with:
+
+```sh
+julia --project -e 'using Pkg; Pkg.test()'
+```
+
+Build the documentation locally with:
+
+```sh
+julia --project=docs -e 'using Pkg; Pkg.instantiate()'
+julia --project=docs docs/make.jl
+```
