@@ -83,5 +83,9 @@ OutputVault.Formats.format_package(::Type{UnloadedFormat}) = "SomeIOPackage"
         @test occursin("UnloadedFormat needs its package: `using SomeIOPackage`.", msg)
         msg = sprint(showerror, try read_table(UnloadedFormat(), "p"); nothing catch e; e end)
         @test occursin("`using SomeIOPackage`", msg)
+        @test Formats.format_package(Formats.ParquetFormat) == "Parquet2"
+        # no hint for a type without a package, or for other functions
+        @test !occursin("needs its package", sprint(showerror, try write_table(1, "p", (a = [1],)); nothing catch e; e end))
+        @test !occursin("needs its package", sprint(showerror, MethodError(sin, ("x",))))
     end
 end

@@ -103,6 +103,22 @@ files_under(dir) = sort([relpath(joinpath(r, f), dir) for (r, _, fs) in walkdir(
             save_solution(rf, Plain(1, [1.0]))                             # a solution that is not a NamedTuple
             @test load_result_item(rf, "solution", Plain) == Plain(1, [1.0])
         end
+        with_vault() do root, repo                                         # its native copy has one key
+            save_solution(rf, Plain(1, [1.0]))
+            @test load_result_item(rf, "solution"; native = true) == (; solution = Plain(1, [1.0]))
+        end
+    end
+
+    @testset "an item in several forms" begin
+        with_vault() do root, repo
+            dir = save_solution(rf, (; x = 1))
+            save_result_item(rf, "stats/uncond", (a = [1.0],))
+            jldsave(joinpath(dir, "stats", "uncond.jld2"); value = 1)          # written outside OutputVault
+            err = try load_result_item(rf, "stats/uncond"); nothing catch e; e end
+            @test err isa ArgumentError && occursin("several forms", err.msg) && occursin("uncond.jld2", err.msg)
+            err = try load_result_item(rf, "stats"); nothing catch e; e end
+            @test err isa ArgumentError && occursin("item uncond in several forms", err.msg)
+        end
     end
 
     @testset "move and delete" begin

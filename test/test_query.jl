@@ -38,6 +38,8 @@ rowset(t) = collect(zip(values(t)...))
             @test rowset(t) == [("main", "v1", "base", "boom", "k", "mean", 3.0), ("main", "v1", "base", "uncond", "k", "mean", 2.9)]
             t = query_results(RunPattern(; experdef = "v1"), stats; sample = "b*", stat = "s*")
             @test t.sample == ["boom", "boom"] && t.stat == ["std", "std"] && isequal(t.value, [0.03, NaN])
+            t = query_results([base], stats; sample = :uncond, variable = ["k", "c*"], stat = :mean)   # a glob and a value on a key
+            @test t.variable == ["c", "k"] && t.value == [0.71, 2.9]
             t = query_results(RunPattern(), stats; sample = :uncond, stat = :mean)       # the missing cell gives no row
             @test rowset(t) == [("main", "v1", "alt", "uncond", "c", "mean", 0.5), ("main", "v1", "base", "uncond", "c", "mean", 0.71),
                                 ("main", "v1", "base", "uncond", "k", "mean", 2.9), ("main", "v2", "base", "uncond", "c", "mean", 9.0)]
@@ -59,6 +61,13 @@ rowset(t) = collect(zip(values(t)...))
             @test query_results([other], stats; stat = [:mean, :std]).value == [9.0, 9.0]
             t = query_results([other], QueryShape("stats/{sample}"; keys = (:variable,), column = :stat, valuetype = String); stat = :note)
             @test t.value == ["text"]
+            save_result_item(base, "counts", (name = [:a, :b], n = [1, 2], flag = [true, false]))
+            counts(T) = QueryShape("counts"; keys = (:name,), column = :col, valuetype = T)
+            for T in (Int64, Int32, Float32)
+                v = query_results([base], counts(T); col = :n).value
+                @test eltype(v) == T && v == [1, 2]
+            end
+            @test query_results([base], counts(Bool); col = :flag).value == [true, false]
         end
 
         @testset "numeric keys and nested placeholders" begin
