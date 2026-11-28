@@ -68,6 +68,39 @@ OutputVault.Formats.format_package(::Type{UnloadedFormat}) = "SomeIOPackage"
         @test t != StoredTable((a = [1],), Dict{String,String}())
     end
 
+    @testset "StoredTable columns" begin
+        t = StoredTable((a = [1, 2], b = [:x, :y]), Dict("k" => "v"))
+        @test t.a == t[:a] == t[1] == [1, 2]
+        @test keys(t) == propertynames(t) == (:a, :b)
+        @test haskey(t, :b) && !haskey(t, :c) && length(t) == 2
+        @test collect(t) == [[1, 2], [:x, :y]]
+        (; b) = t
+        @test b == [:x, :y]
+        @test (@inferred (x -> x.a)(t)) == [1, 2]
+        @test_throws Exception t.c
+        @test Tables.columns(t) === t
+        @test Tables.columntable(t) == (a = [1, 2], b = [:x, :y])
+        @test Tables.schema(t) == Tables.Schema((:a, :b), (Int, Symbol))
+        @test occursin("2 rows, 2 columns", sprint(show, t))
+        # columns named like the type's fields are ordinary columns
+        u = StoredTable((columns = [1], metadata = [2]), Dict("k" => "v"))
+        @test u.columns == [1] && u.metadata == [2] && metadata(u, "k") == "v"
+    end
+
+    @testset "StoredTable metadata and saving" begin
+        @test OutputVault.metadata === DataAPI.metadata
+        @test OutputVault.metadatakeys === DataAPI.metadatakeys
+        t = StoredTable((a = [1],), Dict("k" => "v"))
+        @test metadata(t, "k") == "v"
+        @test metadata(t) == Dict("k" => "v")
+        @test collect(metadatakeys(t)) == ["k"]
+        with_tempdir() do dir
+            path = joinpath(dir, "t.parquet")
+            write_table(fmt, path, t)
+            @test read_table(fmt, path) == t
+        end
+    end
+
     @testset "unsupported columns and reserved metadata" begin
         with_tempdir() do dir
             path = joinpath(dir, "u.parquet")

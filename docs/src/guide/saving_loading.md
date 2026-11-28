@@ -70,6 +70,9 @@ move_result_item(rf, "irf/irf", "irf/ss/stats")     # moved unchanged
 delete_result_item(rf, "irf/old")
 ```
 
+A table loads as a [`StoredTable`](@ref OutputVault.Formats.StoredTable): `t.name` is a column and
+`metadata(t)` its metadata ([Table Formats](@ref) shows how to save a table with metadata).
+
 The run must exist, so its solution must have been saved. Moving onto an existing item, or moving or
 deleting the solution or a reserved name, is an error. [`list_run`](@ref) shows what a run holds:
 

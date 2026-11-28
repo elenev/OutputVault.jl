@@ -15,7 +15,7 @@ within each run.
 
 ```julia
 using Pkg
-Pkg.add(url = "https://github.com/elenev/OutputVault.jl")
+Pkg.add("OutputVault")
 Pkg.add("Parquet2")
 ```
 
@@ -33,7 +33,8 @@ rf = RunHandle("base"; branch = "demo", experdef = "v1")
 solution = (params = (α = 0.33, β = 0.96), policy = [1.0, 1.1, 1.2])
 save_solution(rf, solution)                                # starts the run over
 save_result_item(rf, "stats/uncond", (variable = ["K", "C"], mean = [3.5, 1.2]))
-load_result_item(rf, "stats/uncond")                       # the table, with its metadata
+stats = load_result_item(rf, "stats/uncond")               # a table with its metadata
+stats.mean                                                 # its column `mean`
 
 shape = QueryShape("stats/{sample}"; keys = (:variable,), column = :stat)
 query_results(RunPattern(experdef = "v1"), shape; stat = :mean)   # every run of v1, in long form
@@ -54,6 +55,10 @@ previous result items.
 - [Quick Start](@ref): save, load and compare two runs.
 - [Runs and Storage](@ref): runs, paths, the storage rules and provenance.
 - [Saving and Loading](@ref): configuration, solutions, items, finding runs.
-- [Storing Your Own Types](@ref): storage methods for your package's result types.
-- [Table Formats](@ref): Parquet, and adding a format.
+- [Table Formats](@ref): loaded tables, table metadata and Parquet files.
 - [Queries](@ref): shapes, selections, and the SQL macros for other languages.
+
+To extend OutputVault:
+
+- [Storing Your Own Types](@ref): storage methods for your own result types.
+- [Adding a Table Format](@ref): save tables in another file format.

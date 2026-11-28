@@ -14,8 +14,9 @@ using DataAPI: DataAPI
 using Random: randstring
 
 include("Formats.jl")    # OutputVault.Formats: table file formats
-using .Formats: Formats, AbstractTableFormat, StoredTable
+using .Formats: Formats, AbstractTableFormat, StoredTable, metadata, metadatakeys
 
+export StoredTable, metadata, metadatakeys
 export RunHandle, RunPattern, Config
 export set_config!, with_config, current_branch, find_runs
 export to_storage, from_storage, write_portable_jld2, read_portable_jld2

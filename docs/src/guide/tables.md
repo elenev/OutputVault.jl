@@ -4,24 +4,46 @@ Set `table_format` in [`Config`](@ref) to choose how tables are saved. Each tabl
 with its column names and file metadata. You can also read and write individual table files
 directly through `OutputVault.Formats`, without configuring a run:
 
-```julia
-using OutputVault, OutputVault.Formats, Parquet2, Tables, DataAPI
+```@example tables
+using OutputVault, OutputVault.Formats, Parquet2
 write_table(ParquetFormat(), "t.parquet", (x = [1.0, 2.0], name = [:a, :b]); metadata = Dict("source" => "model"))
-t = read_table(ParquetFormat(), "t.parquet")     # a StoredTable: Tables.columns(t).x, DataAPI.metadata(t, "source")
+t = read_table(ParquetFormat(), "t.parquet")
+t.x, t.name, metadata(t, "source")
+```
+
+## Loaded tables
+
+[`read_table`](@ref OutputVault.Formats.read_table) and [`load_result_item`](@ref) return a table
+file as a [`StoredTable`](@ref OutputVault.Formats.StoredTable), its columns with the file's
+metadata. For a loaded table `t`:
+
+| Expression | Value |
+|:--|:--|
+| `t.x` or `t[:x]` | the column `x` |
+| `t[1]` | the first column |
+| `keys(t)` | the column names |
+| `metadata(t, "source")` | the metadata entry `source` |
+| `metadata(t)` | all metadata, as a `Dict` |
+
+A `StoredTable` is a Tables.jl table, so packages that accept such tables take it directly. To save
+a table with metadata, make one from a NamedTuple of vectors and a `Dict{String,String}`, then pass
+it to [`save_result_item`](@ref) or `write_table`:
+
+```@example tables
+table = StoredTable((x = [3.0],), Dict("source" => "survey"))
+write_table(ParquetFormat(), "survey.parquet", table)
+metadata(read_table(ParquetFormat(), "survey.parquet"))
 ```
 
 ## What every format keeps
 
-- File-level string metadata: the table's own (`DataAPI.metadata`) merged with the `metadata`
+- File-level string metadata: the table's own (`metadata`) merged with the `metadata`
   argument. Keys starting with `outputvault.` are reserved for the format's own entries: writing
   them is an error, and reading removes them, so the metadata read back is the metadata written.
   Column metadata is not kept.
 - Column types: whatever the format's I/O package stores. A type it cannot store is an error from
   that package.
 - Atomic writes: the file is written to a temporary name and then moved into place.
-
-Reading returns a [`StoredTable`](@ref OutputVault.Formats.StoredTable), its columns with the
-file's metadata.
 
 ## Parquet
 
@@ -34,30 +56,4 @@ Without Parquet2 loaded, writing or reading a Parquet table is a `MethodError` w
 `Parquet2`. The metadata restoration of Symbol columns applies to the Julia reader; queries return
 text as strings.
 
-## Adding a format
-
-A format is a type with four methods:
-
-```julia
-using OutputVault, OutputVault.Formats
-import OutputVault.Formats: extension, format_from_extension, write_table, read_table
-
-struct MyFormat <: AbstractTableFormat end
-extension(::MyFormat) = "myext"
-format_from_extension(::Val{:myext}) = MyFormat()      # files *.myext are tables of this format
-
-function write_table(::MyFormat, path, table; metadata = Dict{String,String}())
-    meta = Formats.table_metadata(table, metadata)       # the table's metadata merged with the argument
-    Formats.atomic_write(path) do tmp
-        MyIOPackage.write(tmp, table; metadata = meta)
-    end
-end
-function read_table(::MyFormat, path)
-    meta = filter(kv -> !startswith(first(kv), Formats.RESERVED_PREFIX), MyIOPackage.metadata(path))
-    return Formats.StoredTable(MyIOPackage.columns(path), meta)   # the format's own entries removed
-end
-```
-
-`Base.iswritable(::MyFormat)` may return `false` for a format that is only read. `format_from_extension`
-is what makes a file a table file when a run is read: define it only in the package that defines the
-format. Adding file I/O does not add a DuckDB reader: queries currently support Parquet only.
+To save tables in another file format, see [Adding a Table Format](@ref).

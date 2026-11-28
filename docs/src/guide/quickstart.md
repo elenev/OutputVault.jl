@@ -12,7 +12,7 @@ to both handles below. Saving outside a repository warns and still works.
 ## Configure and name a run
 
 ```@example quickstart
-using OutputVault, Parquet2, Tables
+using OutputVault, Parquet2
 
 root = abspath("../outputs")       # outside the repository, so saved runs leave it clean
 set_config!(Config(output_root = root,
@@ -59,8 +59,12 @@ Saving `stats/boom` again replaces that sample. Saving at `stats` replaces all s
 
 ```@example quickstart
 stats = load_result_item(rf, "stats/uncond")
-Tables.columns(stats).mean
+stats.mean
 ```
+
+A table loads as a [`StoredTable`](@ref OutputVault.Formats.StoredTable): `stats.mean` or
+`stats[:mean]` is a column, and `metadata(stats)` returns the metadata stored with the table
+([Table Formats](@ref)).
 
 Pass a type to read one value from a `.jld2` file:
 
@@ -82,9 +86,8 @@ saved = load_result_item(rf, "solution"; native = true)
 saved.params.β, saved.policy
 ```
 
-The statistics load as a [`StoredTable`](@ref OutputVault.Formats.StoredTable), which you can read
-through Tables.jl. To restore a custom result type, pass its type to `load_result_item`; see
-[Your own type](#Your-own-type).
+To restore a result as your own type, pass the type to `load_result_item`; see
+[Storing Your Own Types](@ref).
 
 ## Query across runs
 
@@ -123,38 +126,3 @@ list_run(rf).items.path
 
 The previous statistics and notes have been removed. Recompute and save the results for the new
 solution, or use a different variant name to keep both solutions and their results.
-
-## Your own type
-
-For a custom summary type, define a Tables.jl interface and a `from_storage` method. This lets you
-save it as a table and load it back as a `Summary`, retaining its label in the file's metadata:
-
-```@example quickstart
-using DataAPI
-
-struct Summary
-    label::String
-    variable::Vector{String}
-    mean::Vector{Float64}
-end
-
-# a Tables.jl table with a label in its file-level metadata
-Tables.istable(::Type{Summary}) = true
-Tables.columnaccess(::Type{Summary}) = true
-Tables.columns(s::Summary) = (variable = s.variable, mean = s.mean)
-DataAPI.metadatasupport(::Type{Summary}) = (read = true, write = false)
-DataAPI.metadatakeys(::Summary) = ("label",)
-DataAPI.metadata(s::Summary, ::AbstractString; style = false) = s.label
-
-# rebuild it from the data OutputVault reads back
-OutputVault.from_storage(::Type{Summary}, data; context = nothing) =
-    Summary(DataAPI.metadata(data, "label"), Tables.columns(data).variable, Tables.columns(data).mean)
-
-save_result_item(rf, "summary", Summary("baseline", ["K", "C"], [3.4, 1.19]))
-s = load_result_item(rf, "summary", Summary)
-(s.label, s.mean)
-```
-
-`Summary` is a table, so it is saved as one, with its metadata; `from_storage` turns the table read
-back into a `Summary`. A type that is not a table can define `to_storage` to say what to save
-instead, or `write_portable_jld2` and `read_portable_jld2` for its own layout inside a `.jld2` file ([Storing Your Own Types](@ref)).
