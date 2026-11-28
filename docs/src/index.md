@@ -1,7 +1,7 @@
 # OutputVault.jl
 
 OutputVault stores the solutions and results of quantitative scientific model runs. Each run has a
-folder named by its git branch, experiment and variant, with a record of the code that produced it.
+folder named by its git branch, experiment and variant, with the git provenance of its solution.
 
 Use it to save a solution, add results as you compute them, and compare those results across runs.
 For example, you can collect unconditional statistics for several calibrations, then query the
