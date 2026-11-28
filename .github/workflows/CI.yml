@@ -11,8 +11,11 @@ on:
       - 'test/**'
       - 'sql/**'
       - 'docs/walkthroughs.jl'
-      - 'docs/src/guide/quickstart.md'   # the tests run these walkthrough pages
+      - 'README.md'                      # the tests run the examples of these pages
+      - 'docs/src/index.md'
+      - 'docs/src/guide/quickstart.md'
       - 'docs/src/guide/frontends.md'
+      - 'docs/src/guide/tables.md'
       - 'Project.toml'
       - '.github/workflows/CI.yml'
 # actions: write lets the cache step delete the caches it replaces

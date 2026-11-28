@@ -66,6 +66,9 @@ OutputVault.isglob
 
 ## Table formats
 
+`metadata(t)`, `metadata(t, key)` and `metadatakeys(t)` read the metadata of a table. They are
+DataAPI.jl's functions, available from `using OutputVault`.
+
 ```@docs
 OutputVault.Formats
 OutputVault.Formats.AbstractTableFormat

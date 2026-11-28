@@ -25,7 +25,7 @@ julia --project=docs docs/make.jl             # documentation, including the exe
 | save_solution, items, list_run, object files | `src/items.jl` |
 | find_runs | `src/discovery.jl` |
 | Queries | `src/query.jl`, `sql/outputvault.sql` |
-| Design | `docs/src/guide/concepts.md`, `docs/src/guide/frontends.md` |
+| Design | `docs/src/guide/concepts.md`, `docs/src/guide/frontends.md`, `docs/src/guide/adding_formats.md` |
 
 ## Invariants
 
@@ -72,11 +72,14 @@ Windows
   (`with_vault` in `test/runtests.jl`), never a real one.
 - The tests include a frontend that is not TFI (`test/test_frontend.jl`); OutputVault's tests do not
   load TransitionFunctionIteration.
-- The `@example` blocks of the quick start also run in a fresh Julia process (`test/test_docs.jl`),
-  so the script needs its own `using` lines.
+- The examples of the README, the home page and the walkthrough pages (`docs/walkthroughs.jl`) run
+  in fresh Julia processes (`test/test_docs.jl`) whose environment holds only OutputVault and
+  Parquet2, so each script needs its own `using` lines.
 
 ## Documentation and releases
 
 - Update docstrings and `docs/src` with any change in behavior. Write them for users, in terms of
   observable behavior.
+- Using OutputVault needs only OutputVault and Parquet2. Tables.jl and DataAPI.jl come up only for
+  developers who extend it.
 - Do not change the version in `Project.toml` unless asked.

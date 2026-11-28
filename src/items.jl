@@ -156,9 +156,9 @@ end
 
 The item at `path` in the run.
 
-Without a type, its data: a table file as a [`StoredTable`](@ref Formats.StoredTable) (columns and
-file metadata), a folder as a NamedTuple of its items in alphabetical order, and
-a `.jld2` file as a Dict of its contents.
+Without a type, its data: a table file as a [`StoredTable`](@ref Formats.StoredTable) (`t.name`
+is a column and `metadata(t)` the file metadata), a folder as a NamedTuple of its items in
+alphabetical order, and a `.jld2` file as a Dict of its contents.
 
 With a type `T`, the item read by `read_portable_jld2(T, io; context)` for a `.jld2` file, and
 otherwise `from_storage(T, data; context)` of its data.

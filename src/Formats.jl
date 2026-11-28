@@ -12,11 +12,12 @@ A format is a type `F <: AbstractTableFormat` with the methods [`extension`](@re
 module Formats
 
 using Tables: Tables
-using DataAPI: DataAPI
+using DataAPI: DataAPI, metadata, metadatakeys
 using Random: randstring
 
 export AbstractTableFormat, ParquetFormat, StoredTable
 export extension, format_from_extension, write_table, read_table
+export metadata, metadatakeys
 
 """
     AbstractTableFormat
@@ -93,33 +94,40 @@ function missing_format_hint(io, exc, argtypes, kwargs)
     print(io, "\n$(nameof(argtypes[1])) needs its package: `using $pkg`.")
 end
 
-## Tables read from files
+## Tables with metadata
 
 """
-    StoredTable
+    StoredTable(columns, metadata)
 
-A table read from a file: its columns (a NamedTuple of vectors) and its file-level metadata (a
-`Dict{String,String}`). It is a Tables.jl column table (`Tables.columns(t)` returns the columns), and `DataAPI.metadata`
-reads the metadata.
+A table with file-level metadata: its columns (a NamedTuple of vectors) and a
+`Dict{String,String}`. Reading a table file returns one, and saving one writes its metadata to the
+file.
+
+It is a Tables.jl column table (a `Tables.AbstractColumns`): `t.name` or `t[:name]` is the column
+`name`, `t[i]` is the `i`th column and `keys(t)` lists the column names. `metadata(t, key)` reads
+one metadata entry, `metadata(t)` all of them, and `metadatakeys(t)` lists their keys.
 """
-struct StoredTable{C <: NamedTuple}
+struct StoredTable{C <: NamedTuple} <: Tables.AbstractColumns
     columns::C
     metadata::Dict{String,String}
 end
 
-Tables.istable(::Type{<:StoredTable}) = true
-Tables.columnaccess(::Type{<:StoredTable}) = true
-Tables.columns(t::StoredTable) = t.columns
-Base.:(==)(a::StoredTable, b::StoredTable) = a.columns == b.columns && a.metadata == b.metadata
+# Tables.jl derives property access, indexing, iteration and display from these methods
+Tables.columnnames(t::StoredTable) = keys(getfield(t, :columns))
+Tables.getcolumn(t::StoredTable, i::Int) = getfield(t, :columns)[i]
+Tables.getcolumn(t::StoredTable, name::Symbol) = getfield(t, :columns)[name]
+Tables.schema(t::StoredTable) = Tables.schema(getfield(t, :columns))
+Base.:(==)(a::StoredTable, b::StoredTable) =
+    getfield(a, :columns) == getfield(b, :columns) && getfield(a, :metadata) == getfield(b, :metadata)
 
 DataAPI.metadatasupport(::Type{<:StoredTable}) = (read = true, write = false)
-DataAPI.metadatakeys(t::StoredTable) = keys(t.metadata)
+DataAPI.metadatakeys(t::StoredTable) = keys(getfield(t, :metadata))
 function DataAPI.metadata(t::StoredTable, key::AbstractString; style::Bool = false)
-    v = t.metadata[key]
+    v = getfield(t, :metadata)[key]
     return style ? (v, :default) : v
 end
 function DataAPI.metadata(t::StoredTable, key::AbstractString, default; style::Bool = false)
-    v = get(t.metadata, key, default)
+    v = get(getfield(t, :metadata), key, default)
     return style ? (v, :default) : v
 end
 

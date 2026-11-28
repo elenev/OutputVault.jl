@@ -45,7 +45,8 @@ rf = RunHandle("base"; branch = "demo", experdef = "v1")
 solution = (params = (α = 0.33, β = 0.96), policy = [1.0, 1.1, 1.2])
 save_solution(rf, solution)                              # starts the run over, records the commit
 save_result_item(rf, "stats/uncond", (variable = ["K", "C"], mean = [3.5, 1.2]))
-load_result_item(rf, "stats/uncond")                     # a table with its metadata
+stats = load_result_item(rf, "stats/uncond")             # a table with its metadata
+stats.mean                                               # its column `mean`
 
 shape = QueryShape("stats/{sample}"; keys = (:variable,), column = :stat)
 query_results(RunPattern(experdef = "v1"), shape; sample = :uncond, stat = :mean)
@@ -67,8 +68,9 @@ switching branches. Saving outside a repository warns and still works.
 
 Start with the [quick start](https://www.vadimelenev.com/OutputVault.jl/stable/guide/quickstart/), then read about
 [runs and storage](https://www.vadimelenev.com/OutputVault.jl/stable/guide/concepts/), [saving and loading](https://www.vadimelenev.com/OutputVault.jl/stable/guide/saving_loading/),
-[storing your own types](https://www.vadimelenev.com/OutputVault.jl/stable/guide/frontends/), [table formats](https://www.vadimelenev.com/OutputVault.jl/stable/guide/tables/)
-and [queries](https://www.vadimelenev.com/OutputVault.jl/stable/guide/queries/).
+[table formats](https://www.vadimelenev.com/OutputVault.jl/stable/guide/tables/) and [queries](https://www.vadimelenev.com/OutputVault.jl/stable/guide/queries/).
+To extend OutputVault, see [storing your own types](https://www.vadimelenev.com/OutputVault.jl/stable/guide/frontends/)
+and [adding a table format](https://www.vadimelenev.com/OutputVault.jl/stable/guide/adding_formats/).
 
 ## Development
 

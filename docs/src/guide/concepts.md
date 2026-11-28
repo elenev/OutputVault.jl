@@ -50,7 +50,7 @@ OutputVault writes a value `v` at path `p` as follows.
 1. It computes `s = to_storage(v)` ([`to_storage`](@ref); `v` itself unless a package says
    otherwise).
 2. If `s` is a table, it writes one table file `p.<ext>` with the configured table format and the
-   table's own file-level metadata (`DataAPI.metadata`). A NamedTuple of equal-length vectors is a
+   table's own file-level metadata (`metadata(s)`). A NamedTuple of equal-length vectors is a
    table; a NamedTuple of vectors of unequal lengths is an error naming the path. Writing a table
    without a table format in the configuration is an error.
 3. Else, if `s` is a NamedTuple, it writes a folder `p/`, with each member `m` at `p/m` by these same

@@ -5,10 +5,48 @@ these methods, along with any save, load or query functions you provide, is call
 
 For an object stored as a table or folder, define `to_storage` to choose its representation and
 `from_storage` to rebuild it. For an object stored in its own JLD2 file, you can define a layout
-inside that file. Both approaches are illustrated below.
+inside that file. Each approach is illustrated below, with this setup:
 
-A type that already implements Tables.jl can be saved directly; add `from_storage` to restore it
-as that type when loading.
+```@example frontend
+using OutputVault, Parquet2
+import OutputVault: to_storage, from_storage, write_portable_jld2, read_portable_jld2
+
+set_config!(Config(output_root = abspath("../outputs"),
+                   table_format = OutputVault.Formats.ParquetFormat()))
+rf = RunHandle("base"; experdef = "frontend")
+save_solution(rf, (;))                       # starts the run
+nothing # hide
+```
+
+## An object stored as a table
+
+To save an object as one table, return a [`StoredTable`](@ref OutputVault.Formats.StoredTable)
+from `to_storage`. It takes the columns, as a NamedTuple of vectors, and the table's metadata, as a
+`Dict{String,String}`. Here the metadata keeps a label:
+
+```@example frontend
+struct Summary
+    label::String
+    variable::Vector{String}
+    mean::Vector{Float64}
+end
+
+# save a table, with the label in its metadata
+to_storage(s::Summary) = StoredTable((; s.variable, s.mean), Dict("label" => s.label))
+
+# rebuild a Summary from the table read back
+from_storage(::Type{Summary}, data; context = nothing) =
+    Summary(metadata(data, "label"), data.variable, data.mean)
+
+save_result_item(rf, "summary", Summary("baseline", ["K", "C"], [3.4, 1.19]))
+s = load_result_item(rf, "summary", Summary)
+(s.label, s.mean)
+```
+
+A type that implements the Tables.jl interface is saved as a table without a `to_storage` method;
+add `from_storage` to restore it when loading. Implement the interface when other packages should
+also read your type as a table. Your package then depends on Tables.jl, and on DataAPI.jl if the
+type has metadata.
 
 ## An object stored as a folder
 
@@ -16,13 +54,6 @@ A small economy holds numeric parameters and settings. Store parameters as a que
 table and settings as individual `.jld2` values:
 
 ```@example frontend
-using OutputVault, Parquet2, Tables
-import OutputVault: to_storage, from_storage, write_portable_jld2, read_portable_jld2
-
-set_config!(Config(output_root = abspath("../outputs"),
-                   table_format = OutputVault.Formats.ParquetFormat()))
-rf = RunHandle("base"; experdef = "frontend")
-
 struct Economy
     beta::Float64
     sigma::Float64
@@ -34,8 +65,8 @@ end
 to_storage(e::Economy) = (params = (beta = [e.beta], sigma = [e.sigma]), settings = (; e.distro, e.mit))
 
 function from_storage(::Type{Economy}, data; context = nothing)
-    params = Tables.columns(data.params)
-    return Economy(only(params.beta), only(params.sigma), data.settings.distro["value"], data.settings.mit["value"])
+    params, settings = data.params, data.settings
+    return Economy(only(params.beta), only(params.sigma), settings.distro["value"], settings.mit["value"])
 end
 
 economy = Economy(0.99, 2.0, "Beta", true)
