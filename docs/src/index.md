@@ -15,7 +15,7 @@ within each run.
 
 ```julia
 using Pkg
-Pkg.add(url = "https://github.com/elenev/OutputVault.jl")
+Pkg.add("OutputVault")
 Pkg.add("Parquet2")
 ```
 

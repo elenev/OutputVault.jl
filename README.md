@@ -24,7 +24,7 @@ names and can [define how your own types are stored](https://www.vadimelenev.com
 
 ```julia
 using Pkg
-Pkg.add(url = "https://github.com/elenev/OutputVault.jl")
+Pkg.add("OutputVault")
 Pkg.add("Parquet2")   # table I/O; queries use DuckDB, included with OutputVault
 ```
 
@@ -84,3 +84,8 @@ Build the documentation locally with:
 julia --project=docs -e 'using Pkg; Pkg.instantiate()'
 julia --project=docs docs/make.jl
 ```
+
+## AI use
+
+Parts of the code and most of the tests and documentation were written with Claude Code.
+Everything was reviewed by the author.
